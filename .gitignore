@@ -1,0 +1,89 @@
+# Compiled Object files
+*.o
+*.obj
+*.lo
+*.slo
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.so.*
+*.dylib
+*.dll
+
+# Compiled Static libraries
+*.a
+*.la
+*.lai
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+# CMake
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+build/
+build*/
+
+# Make
+Makefile
+!CMakeLists.txt
+
+# Ninja
+.ninja_deps
+.ninja_log
+build.ninja
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Core dumps
+core
+core.*
+vgcore.*
+
+# Backup / swap files
+*~
+*.swp
+*.swo
+*.bak
+
+# Editor/IDE
+.vscode/
+.idea/
+*.iml
+.clangd/
+.cache/
+compile_commands.json
+
+# ccache
+.ccache/
+
+# Package manager artifacts
+vcpkg_installed/
+conan.lock
+conanbuildinfo.*
+conaninfo.txt
+
+# Ubuntu/Linux system files
+.directory
+.Trash-*
+.fuse_hidden*
+
+# Logs
+*.log
