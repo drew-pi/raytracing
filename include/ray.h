@@ -17,15 +17,15 @@ public:
   constexpr ray(const point3<T> &o, const vec3<T> &d) noexcept
       : orig(o), dir(d) {}
 
-  // uses a const reference so cannot retain the reference after the underlying
-  // object is destroyed
-  [[nodiscard]] constexpr const point3<T> origin() const noexcept {
+  // uses a const reference so after the underlying object is destroyedcannot
+  // retain the reference
+  [[nodiscard]] constexpr const point3<T> &origin() const noexcept {
     return orig;
   }
 
-  // uses a const reference so cannot retain the reference after the underlying
-  // object is destroyed
-  [[nodiscard]] constexpr const vec3<T> direction() const noexcept {
+  // uses a const reference so after the underlying object is destroyedcannot
+  // retain the reference
+  [[nodiscard]] constexpr const vec3<T> &direction() const noexcept {
     return dir;
   }
 

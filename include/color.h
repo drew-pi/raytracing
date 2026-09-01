@@ -1,5 +1,6 @@
 #pragma once
 
+#include <concepts>
 #include <ostream>
 #include <vec3.h>
 
