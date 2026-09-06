@@ -5,16 +5,16 @@
 
 template <std::floating_point T> using point3 = vec3<T>;
 
-template <std::floating_point T> class ray {
+template <std::floating_point T> class Ray {
 
 private:
   point3<T> orig;
   vec3<T> dir;
 
 public:
-  constexpr ray() noexcept = default;
+  constexpr Ray() noexcept = default;
 
-  constexpr ray(const point3<T> &o, const vec3<T> &d) noexcept
+  constexpr Ray(const point3<T> &o, const vec3<T> &d) noexcept
       : orig(o), dir(d) {}
 
   // uses a const reference so after the underlying object is destroyedcannot

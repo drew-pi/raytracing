@@ -1,28 +1,22 @@
 #include <format>
 #include <iostream>
+#include <memory>
 
 #include <color.h>
+#include <hittable.h>
+#include <hittable_list.h>
+#include <interval.h>
 #include <ray.h>
+#include <sphere.h>
 #include <vec3.h>
 
-bool hit_sphere(const point3<double> &center, double radius,
-                const ray<double> &r) {
+color<double> ray_color(const Ray<double> &r, const Hittable<double> &world) {
 
-  auto oc = center - r.origin();
-  auto a = dot(r.direction(), r.direction());
-  auto b = -2 * dot(r.direction(), oc);
-  auto c = dot(oc, oc) - radius * radius;
+  auto interval = Interval<double>();
 
-  auto discriminant = b * b - 4 * a * c;
-  return (discriminant >= 0);
-}
-
-auto ray_color(const ray<double> &r) {
-  auto circle_center = point3<double>(0, 0, -2);
-  auto circle_radius = 0.5;
-
-  if (hit_sphere(circle_center, circle_radius, r))
-    return color<double>(1, 0, 0);
+  if (auto candidate = world.hit(r, interval)) {
+    return 0.5 * (candidate->normal + color<double>(1, 1, 1));
+  }
 
   vec3<double> unit = unit_vector(r.direction());
   auto a = 0.5 * (unit.y() + 1.0); // remaps [-1, 1] to [0,1]
@@ -37,6 +31,13 @@ int main() {
   auto image_height = int(image_width / aspect_ratio);
   image_height = (image_height < 1) ? 1 : image_height;
 
+  // set up the world
+  HittableList<double> world;
+  world.add(std::make_unique<Sphere<double>>(point3<double>(0, 0, -1), 0.5));
+  world.add(
+      std::make_unique<Sphere<double>>(point3<double>(0, -100.5, -1), 100));
+
+  // set up the camera
   auto focal_length = 1.0;
 
   auto viewport_height = 2.0;
@@ -68,9 +69,9 @@ int main() {
       auto pixel_center = pixel00 + pixel_delta_u * i + pixel_delta_v * j;
       auto ray_direction = pixel_center - camera_center;
 
-      ray r(camera_center, ray_direction);
+      Ray r(camera_center, ray_direction);
 
-      auto pixel_color = ray_color(r);
+      auto pixel_color = ray_color(r, world);
       write_color(std::cout, pixel_color);
     }
   }
