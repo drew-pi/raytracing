@@ -3,19 +3,27 @@
 #include <cassert>
 #include <cmath>
 #include <concepts>
-#include <hittable.h>
+#include <memory>
 #include <optional>
+#include <utility>
+
+#include <hittable.h>
+#include <material.h>
 #include <ray.h>
 
 template <std::floating_point T> class Sphere : public Hittable<T> {
 private:
   point3<T> center;
   T radius;
+  std::unique_ptr<Material<T>> material;
 
 public:
-  constexpr Sphere(const point3<T> &center, T radius) noexcept
-      : center(center), radius(radius) {
+  Sphere(const point3<T> &center, T radius,
+         std::unique_ptr<Material<T>> surface_material) noexcept
+      : center(center), radius(radius), material(std::move(surface_material)) {
+    // TODO: Initialize the material pointer `material`.
     assert(radius > T{0});
+    assert(material != nullptr);
   }
 
   [[nodiscard]] std::optional<HitRecord<T>>
@@ -45,12 +53,13 @@ public:
         return std::nullopt;
     }
 
-    auto record = HitRecord<T>();
-    record.t = root;
-    record.p = r.at(root);
-    auto outward_normal = (record.p - center) / radius;
-    // assigns record.normal and record.front_face
-    record.set_face_normal(r, outward_normal);
+    auto ray_parameter = root;
+    auto hit_point = r.at(root);
+    auto outward_normal = (hit_point - center) / radius;
+    // material is guaranteed to be non null because of the assertion in the
+    // constructor (at least for debug runs)
+    auto record =
+        HitRecord<T>(hit_point, ray_parameter, *material, r, outward_normal);
 
     return std::optional<HitRecord<T>>(record);
   }

@@ -5,7 +5,10 @@
 #include <cmath>
 #include <concepts>
 #include <cstddef>
+#include <limits>
 #include <ostream>
+
+#include <utility.h>
 
 template <std::floating_point T> class vec3 {
 
@@ -65,6 +68,48 @@ public:
   }
 
   [[nodiscard]] T length() const noexcept { return std::sqrt(squared_norm()); }
+
+  [[nodiscard]] static vec3<T> random() {
+    return vec3(random_real<T>(), random_real<T>(), random_real<T>());
+  }
+
+  [[nodiscard]] static vec3<T> random(T min, T max) {
+    return vec3(random_real<T>(min, max), random_real<T>(min, max),
+                random_real<T>(min, max));
+  }
+
+  static constexpr T minimum_length_squared = std::numeric_limits<T>::min();
+
+  [[nodiscard]] static vec3<T> random_unit_vector() {
+    while (true) {
+      vec3<T> p = random(-1, 1);
+      auto lensq = p.squared_norm();
+      if (minimum_length_squared < lensq && lensq <= 1) {
+        return p / std::sqrt(lensq);
+      }
+    }
+  }
+
+  [[nodiscard]] static vec3<T> random_on_hemisphere(const vec3<T> &normal) {
+    auto unit = random_unit_vector();
+
+    if (dot(unit, normal) > T{0})
+      return unit;
+    else
+      return -unit;
+  }
+
+  [[nodiscard]] static vec3<T> reflect(const vec3<T> &v,
+                                       const vec3<T> &normal) {
+    return v - 2 * dot(v, normal) * normal;
+  }
+
+  [[nodiscard]] bool near_zero() const noexcept {
+    constexpr T threshold = T{100} * std::numeric_limits<T>::epsilon();
+
+    return std::abs(e[0]) < threshold && std::abs(e[1]) < threshold &&
+           std::abs(e[2]) < threshold;
+  }
 
   // friend function definitions
 

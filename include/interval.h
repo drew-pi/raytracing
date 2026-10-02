@@ -12,7 +12,8 @@ private:
 
 public:
   constexpr Interval() noexcept
-      : minimum(T{0}), maximum(std::numeric_limits<T>::infinity()) {}
+      : minimum(std::numeric_limits<T>::infinity()),
+        maximum(-std::numeric_limits<T>::infinity()) {}
 
   constexpr Interval(const T min, const T max) noexcept
       : minimum(min), maximum(max) {}
@@ -32,13 +33,16 @@ public:
   [[nodiscard]] constexpr T size() const noexcept { return maximum - minimum; }
 
   [[nodiscard]] static constexpr Interval empty() noexcept {
-    return Interval{std::numeric_limits<T>::infinity(),
-                    -std::numeric_limits<T>::infinity()};
+    return Interval();
   }
 
   [[nodiscard]] static constexpr Interval universe() noexcept {
     return Interval{-std::numeric_limits<T>::infinity(),
                     std::numeric_limits<T>::infinity()};
+  }
+
+  [[nodiscard]] static constexpr Interval standard() noexcept {
+    return Interval{0.001, std::numeric_limits<T>::infinity()};
   }
 
   [[nodiscard]] constexpr T clamp(T t) const noexcept {
