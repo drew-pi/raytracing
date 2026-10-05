@@ -13,4 +13,17 @@ To build the project run the following command from the root of the project
 
 Then to run the executable use
 
-`./build/raytracer`
+`./build/raytracer > image.ppm`
+
+## In order to compile for speed use
+
+```bash
+cmake -S . -B release \
+  -DCMAKE_CXX_COMPILER=g++ \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=native"
+```
+
+`cmake --build release --parallel`
+
+`./release/raytracer > image.ppm`

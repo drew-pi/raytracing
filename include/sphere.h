@@ -13,22 +13,34 @@
 
 template <std::floating_point T> class Sphere : public Hittable<T> {
 private:
-  point3<T> center;
+  Ray<T> center;
   T radius;
   std::unique_ptr<Material<T>> material;
 
 public:
-  Sphere(const point3<T> &center, T radius,
+  // Stationary Sphere
+  Sphere(const point3<T> &static_center, T radius,
          std::unique_ptr<Material<T>> surface_material) noexcept
-      : center(center), radius(radius), material(std::move(surface_material)) {
-    // TODO: Initialize the material pointer `material`.
+      : center(static_center), radius(radius),
+        material(std::move(surface_material)) {
+    assert(radius > T{0});
+    assert(material != nullptr);
+  }
+
+  // Moving sphere
+  Sphere(const point3<T> &original_center, const point3<T> &final_center,
+         T radius, std::unique_ptr<Material<T>> surface_material) noexcept
+      : center(original_center, final_center - original_center), radius(radius),
+        material(std::move(surface_material)) {
     assert(radius > T{0});
     assert(material != nullptr);
   }
 
   [[nodiscard]] std::optional<HitRecord<T>>
   hit(const Ray<T> &r, Interval<T> interval) const override {
-    auto oc = center - r.origin();
+
+    point3<T> current_center = center.at(r.time());
+    vec3<T> oc = current_center - r.origin();
 
     // make sure we are never dividing by zero
     auto a = dot(r.direction(), r.direction());
@@ -55,7 +67,7 @@ public:
 
     auto ray_parameter = root;
     auto hit_point = r.at(root);
-    auto outward_normal = (hit_point - center) / radius;
+    vec3<T> outward_normal = (hit_point - current_center) / radius;
     // material is guaranteed to be non null because of the assertion in the
     // constructor (at least for debug runs)
     auto record =

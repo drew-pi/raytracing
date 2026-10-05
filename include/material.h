@@ -35,7 +35,7 @@ public:
     // the exact opposite of the normal at the hit point
     scatter_dir = scatter_dir.near_zero() ? hit.normal : scatter_dir;
 
-    auto scattered = Ray(hit.p, scatter_dir);
+    auto scattered = Ray(hit.p, scatter_dir, ray_in.time());
     auto attenuation = albedo;
 
     return ScatterRecord<T>(scattered, attenuation);
@@ -53,7 +53,7 @@ public:
   scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const override {
     vec3<T> reflection = vec3<T>::reflect(ray_in.direction(), hit.normal);
 
-    auto scattered = Ray(hit.p, reflection);
+    auto scattered = Ray(hit.p, reflection, ray_in.time());
     auto attenuation = albedo;
 
     return ScatterRecord<T>(scattered, attenuation);

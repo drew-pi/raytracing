@@ -18,6 +18,12 @@ public:
   int samples_per_pixel = 10;
   int max_depth = 10; // Maximum number of ray bounces into scene
 
+  T vfov = T{90}; // vertical view angle (field of view)
+  point3<T> look_from =
+      point3<T>(0, 0, 0); // the point the camera is looking from
+  point3<T> look_at = point3<T>(0, 0, -1); // the point the camera is looking at
+  vec3<T> v_up = vec3<T>(0, 1, 0); // relative up direction for the camera
+
   void render(const Hittable<T> &world) {
     initialize();
 
@@ -52,6 +58,8 @@ private:
   vec3<T> pixel_delta_u;
   vec3<T> pixel_delta_v;
 
+  vec3<T> u, v, w; // camera frame basis vectors
+
   void initialize() noexcept {
 
     assert(aspect_ratio > T{0});
@@ -63,25 +71,35 @@ private:
 
     pixel_samples_scale = T{1} / samples_per_pixel;
 
-    camera_center = point3<T>(0, 0, 0);
+    camera_center = look_from;
 
     // set up the camera
-    auto focal_length = 1.0;
+    auto focal_length = (look_from - look_at).length();
 
-    auto viewport_height = 2.0;
+    // determine viewport dims
+    auto theta = degree_to_radians(vfov);
+    auto h = std::tan(theta / 2);
+    auto viewport_height = T{2.0} * h * focal_length;
     auto viewport_width =
         viewport_height *
         ((static_cast<T>(image_width) / static_cast<T>(image_height)));
 
-    auto viewport_u = vec3<T>(viewport_width, 0, 0);
-    auto viewport_v = vec3<T>(0, -viewport_height, 0);
+    // calculate the camera frame basis vectors (camera coordinate frame)
+    w = unit_vector(look_from - look_at);
+    u = unit_vector(cross(v_up, w));
+    v = cross(w, u);
+
+    auto viewport_u =
+        viewport_width * u; // vector across viewport horizontal edge
+    auto viewport_v =
+        viewport_height * -v; // vector across viewport vertical edge
 
     pixel_delta_u = viewport_u / image_width;
     pixel_delta_v = viewport_v / image_height;
 
     // calculate the location of the upper left pixel
-    auto viewport_upper_left = camera_center - vec3<T>(0, 0, focal_length) -
-                               viewport_u / 2 - viewport_v / 2;
+    auto viewport_upper_left =
+        camera_center - (focal_length * w) - viewport_u / 2 - viewport_v / 2;
     pixel00 = viewport_upper_left + pixel_delta_u / 2 + pixel_delta_v / 2;
   }
 
@@ -99,8 +117,9 @@ private:
 
     auto ray_origin = camera_center;
     auto ray_direction = pixel_sample - ray_origin;
+    T ray_time = random_real<T>();
 
-    return Ray(ray_origin, ray_direction);
+    return Ray(ray_origin, ray_direction, ray_time);
   }
 
   [[nodiscard]] Color<T> ray_color(const Ray<T> &r, int depth,
