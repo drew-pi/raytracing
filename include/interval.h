@@ -2,8 +2,10 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <concepts>
 #include <limits>
+#include <numeric>
 
 template <std::floating_point T> class Interval {
 
@@ -70,4 +72,15 @@ public:
   [[nodiscard]] constexpr T min() const noexcept { return minimum; }
 
   [[nodiscard]] constexpr T max() const noexcept { return maximum; }
+
+  [[nodiscard]] constexpr T mid() const noexcept {
+    assert(std::isfinite(minimum) &&
+           "Interval::mid() requires a finite minimum");
+    assert(std::isfinite(maximum) &&
+           "Interval::mid() requires a finite maximum");
+    assert(minimum <= maximum &&
+           "Interval::mid() requires a non-empty interval");
+
+    return std::midpoint(minimum, maximum);
+  }
 };

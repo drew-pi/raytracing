@@ -55,6 +55,24 @@ public:
     return z;
   }
 
+  [[nodiscard]] constexpr const point3<T> centroid() const noexcept {
+    return point3<T>(x.mid(), y.mid(), z.mid());
+  }
+
+  [[nodiscard]] constexpr const T surface_area() const noexcept {
+
+    T front = x.size() * y.size();
+    T back = front;
+
+    T bottom = x.size() * z.size();
+    T top = bottom;
+
+    T side = y.size() * z.size();
+    T second_side = side;
+
+    return front + back + bottom + top + side + second_side;
+  }
+
   [[nodiscard]] constexpr int longest_axis() const {
 
     if (x.size() > y.size()) {
@@ -93,11 +111,11 @@ public:
       interval.minimum = std::max(interval.min(), std::min(t0, t1));
       interval.maximum = std::min(interval.max(), std::max(t0, t1));
 
-      if (interval.maximum <= interval.minimum)
+      if (interval.maximum < interval.minimum)
         return false;
     }
 
-    return true;
+    return interval.maximum >= interval.minimum;
   }
 
   [[nodiscard]] static constexpr BoundingBox<T> empty() noexcept {
