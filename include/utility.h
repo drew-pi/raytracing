@@ -17,3 +17,8 @@ template <std::floating_point T> [[nodiscard]] T random_real() {
 template <std::floating_point T> [[nodiscard]] T random_real(T min, T max) {
   return min + (max - min) * random_real<T>();
 }
+
+inline int random_int(int min, int max) {
+  // Returns a random integer in [min,max].
+  return min + static_cast<int>((max - min + 1) * random_real<float>());
+}

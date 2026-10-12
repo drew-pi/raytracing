@@ -1,5 +1,6 @@
 #pragma once
 
+#include <bound_box.h>
 #include <interval.h>
 #include <ray.h>
 
@@ -50,4 +51,6 @@ public:
 
   [[nodiscard]] virtual std::optional<HitRecord<T>>
   hit(const Ray<T> &r, Interval<T> interval) const = 0;
+
+  [[nodiscard]] virtual BoundingBox<T> bounding_box() const = 0;
 };

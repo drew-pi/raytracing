@@ -1,5 +1,6 @@
 
 #include "scene.h"
+#include <bvh.h>
 
 int main() {
 
@@ -48,30 +49,31 @@ int main() {
   // camera.look_at = point3<double>(0, 0, -1);
   // camera.v_up = vec3<double>(0, 1, 0);
 
-  HittableList<double> world;
+  // HittableList<double> world;
 
-  world.add(std::make_unique<Sphere<double>>(
-      point3<double>(0, -100.5, -2), 100.0,
-      std::make_unique<Lambertian<double>>(Color<double>(0.5, 0.5, 0.5))));
+  // world.add(std::make_unique<Sphere<double>>(
+  //     point3<double>(0, -100.5, -2), 100.0,
+  //     std::make_unique<Lambertian<double>>(Color<double>(0.5, 0.5, 0.5))));
 
-  // Sharp reference sphere.
-  world.add(std::make_unique<Sphere<double>>(
-      point3<double>(0, 0, -3), 0.4,
-      std::make_unique<Lambertian<double>>(Color<double>(0.2, 0.3, 0.9))));
+  // // Sharp reference sphere.
+  // world.add(std::make_unique<Sphere<double>>(
+  //     point3<double>(0, 0, -3), 0.4,
+  //     std::make_unique<Lambertian<double>>(Color<double>(0.2, 0.3, 0.9))));
 
-  // Moves left to right during the camera's [0, 1) exposure.
-  world.add(std::make_unique<Sphere<double>>(
-      point3<double>(-0.8, 0.0, -1.5), point3<double>(-0.8, -0.2, -1.5), 0.3,
-      std::make_unique<Lambertian<double>>(Color<double>(0.9, 0.15, 0.1))));
+  // // Moves left to right during the camera's [0, 1) exposure.
+  // world.add(std::make_unique<Sphere<double>>(
+  //     point3<double>(-0.8, 0.0, -1.5), point3<double>(-0.8, -0.2, -1.5), 0.3,
+  //     std::make_unique<Lambertian<double>>(Color<double>(0.9, 0.15, 0.1))));
 
-  Camera<double> camera;
-  camera.aspect_ratio = 16.0 / 9.0;
-  camera.image_width = 800;
-  camera.samples_per_pixel = 300;
-  camera.max_depth = 6;
-  camera.vfov = 60;
+  // Camera<double> camera;
+  // camera.aspect_ratio = 16.0 / 9.0;
+  // camera.image_width = 800;
+  // camera.samples_per_pixel = 300;
+  // camera.max_depth = 6;
+  // camera.vfov = 60;
 
-  // auto [camera, world] = create_scene();
+  auto [camera, world] = create_scene();
+  BVHNode<double> bvh(std::move(world));
 
-  camera.render(world);
+  camera.render(bvh);
 }

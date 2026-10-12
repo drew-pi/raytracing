@@ -16,6 +16,7 @@ private:
   Ray<T> center;
   T radius;
   std::unique_ptr<Material<T>> material;
+  BoundingBox<T> _bounding_box;
 
 public:
   // Stationary Sphere
@@ -25,6 +26,8 @@ public:
         material(std::move(surface_material)) {
     assert(radius > T{0});
     assert(material != nullptr);
+
+    _bounding_box = BoundingBox(static_center - radius, static_center + radius);
   }
 
   // Moving sphere
@@ -34,6 +37,16 @@ public:
         material(std::move(surface_material)) {
     assert(radius > T{0});
     assert(material != nullptr);
+
+    BoundingBox start_bounding_box(center.at(0) - radius,
+                                   center.at(0) + radius);
+    BoundingBox end_bounding_box(center.at(1) - radius, center.at(1) + radius);
+
+    _bounding_box = BoundingBox(start_bounding_box, end_bounding_box);
+  }
+
+  [[nodiscard]] constexpr BoundingBox<T> bounding_box() const override {
+    return _bounding_box;
   }
 
   [[nodiscard]] std::optional<HitRecord<T>>

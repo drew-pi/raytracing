@@ -1,22 +1,27 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <limits>
 
 template <std::floating_point T> class Interval {
 
-private:
+public:
   T minimum;
   T maximum;
 
-public:
   constexpr Interval() noexcept
       : minimum(std::numeric_limits<T>::infinity()),
         maximum(-std::numeric_limits<T>::infinity()) {}
 
   constexpr Interval(const T min, const T max) noexcept
       : minimum(min), maximum(max) {}
+
+  constexpr Interval(const Interval<T> &i1, const Interval<T> &i2) noexcept {
+    minimum = std::min(i1.min(), i2.min());
+    maximum = std::max(i1.max(), i2.max());
+  }
 
   [[nodiscard]] constexpr bool is_empty() const noexcept {
     return minimum > maximum;
@@ -55,6 +60,11 @@ public:
       return maximum;
     }
     return t;
+  }
+
+  [[nodiscard]] constexpr Interval<T> expand(T delta) const noexcept {
+    T padding = delta / T{2};
+    return Interval(minimum - padding, maximum + padding);
   }
 
   [[nodiscard]] constexpr T min() const noexcept { return minimum; }

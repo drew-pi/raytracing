@@ -122,9 +122,29 @@ public:
     return vec3(u.e[0] + v.e[0], u.e[1] + v.e[1], u.e[2] + v.e[2]);
   }
 
+  [[nodiscard]] friend constexpr auto operator+(T t,
+                                                const vec3<T> &v) noexcept {
+    return vec3(t + v.e[0], t + v.e[1], t + v.e[2]);
+  }
+
+  [[nodiscard]] friend constexpr auto operator+(const vec3<T> &v,
+                                                T t) noexcept {
+    return t + v;
+  }
+
   [[nodiscard]] friend constexpr auto operator-(const vec3<T> &u,
                                                 const vec3<T> &v) noexcept {
     return vec3(u.e[0] - v.e[0], u.e[1] - v.e[1], u.e[2] - v.e[2]);
+  }
+
+  [[nodiscard]] friend constexpr auto operator-(T t,
+                                                const vec3<T> &v) noexcept {
+    return vec3(t - v.e[0], t - v.e[1], t - v.e[2]);
+  }
+
+  [[nodiscard]] friend constexpr auto operator-(const vec3<T> &v,
+                                                T t) noexcept {
+    return vec3(v.e[0] - t, v.e[1] - t, v.e[2] - t);
   }
 
   [[nodiscard]] friend constexpr auto operator*(const vec3<T> &u,
