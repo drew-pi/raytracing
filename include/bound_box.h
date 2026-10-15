@@ -82,6 +82,8 @@ public:
     return y.size() > z.size() ? 1 : 2;
   }
 
+  // constexpr bool hit(const Ray<T> &ray, Interval<T> interval,
+  //                    const T axis_direction_inv) const noexcept {
   constexpr bool hit(const Ray<T> &ray, Interval<T> interval) const noexcept {
 
     for (int axis = 0; axis < 3; axis++) {

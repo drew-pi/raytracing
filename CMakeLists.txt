@@ -10,6 +10,12 @@ add_executable(raytracer
     src/main.cpp
 )
 
+add_executable(raytracer_bench src/benchmark.cpp)
+
+target_include_directories(raytracer_bench PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
 target_include_directories(raytracer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )

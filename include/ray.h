@@ -12,6 +12,17 @@ private:
   vec3<T> dir;
   T t;
 
+  [[nodiscard]] static constexpr T inverse_component(T value) noexcept {
+    return value == T{0} ? T{0} : T{1} / value;
+  }
+
+  [[nodiscard]] static constexpr vec3<T>
+  inverse_of(const vec3<T> &direction) noexcept {
+    return vec3<T>(inverse_component(direction.x()),
+                   inverse_component(direction.y()),
+                   inverse_component(direction.z()));
+  }
+
 public:
   constexpr Ray() noexcept = default;
 

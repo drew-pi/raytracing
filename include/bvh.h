@@ -5,22 +5,33 @@
 #include <hittable_list.h>
 
 #include <algorithm>
+#include <cassert>
+#include <cmath>
 #include <concepts>
+#include <limits>
 #include <memory>
+#include <optional>
+#include <utility>
+#include <vector>
+
+template <std::floating_point T> struct BVHEntry {
+  BoundingBox<T> box;
+
+  size_t right_child = 0; // Internal: left child is this node's index + 1.
+
+  size_t first_primitive = 0; // Leaf: start in the shared primitive vector.
+  size_t primitive_count = 0; // Zero means internal; positive means leaf.
+};
 
 template <std::floating_point T> class BVHNode : public Hittable<T> {
 
 private:
-  std::unique_ptr<Hittable<T>> left;
-  std::unique_ptr<Hittable<T>> right;
-  BoundingBox<T> _bounding_box;
+  std::vector<BVHEntry<T>> nodes;
+  std::vector<std::unique_ptr<Hittable<T>>> primitives;
+  mutable std::vector<size_t> traversal_stack;
 
-public:
-  BVHNode(HittableList<T> objects)
-      : BVHNode(objects.objects, 0, objects.objects.size()) {}
-
-  BVHNode(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
-          size_t end) {
+  void build(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
+             size_t end) {
 
     assert(start < end);
     assert(end <= objects.size());
@@ -29,16 +40,21 @@ public:
 
     // base case
     if (span == 1) {
-      left = std::move(objects[start]);
-      _bounding_box = left->bounding_box();
+      size_t primitive_index = primitives.size();
+      nodes.push_back(
+          BVHEntry{objects[start]->bounding_box(), 0, primitive_index, 1});
+      primitives.push_back(std::move(objects[start]));
       return;
     }
     // second base case
     if (span == 2) {
-      left = std::move(objects[start]);
-      right = std::move(objects[start + 1]);
-      _bounding_box =
-          BoundingBox<T>(left->bounding_box(), right->bounding_box());
+      size_t primitive_left_index = primitives.size();
+      nodes.push_back(
+          BVHEntry{BoundingBox<T>(objects[start]->bounding_box(),
+                                  objects[start + 1]->bounding_box()),
+                   0, primitive_left_index, 2});
+      primitives.push_back(std::move(objects[start]));
+      primitives.push_back(std::move(objects[start + 1]));
       return;
     }
 
@@ -49,11 +65,24 @@ public:
       size_t original_index;
     };
 
+    // Cache boxes and centroids contiguously to avoid repeated primitive
+    // pointer dereferences during sorting and SAH evaluation.
     std::vector<BuildEntry> entries;
     entries.reserve(span);
 
-    for (size_t i = start; i < end; ++i) {
+    const BoundingBox<T> box = objects[start]->bounding_box();
+    entries.push_back(BuildEntry{
+        box,
+        box.centroid(),
+        start,
+    });
+
+    // get parent surface area
+    BoundingBox<T> parent_bounding_box = entries.front().box;
+
+    for (size_t i = start + 1; i < end; ++i) {
       const BoundingBox<T> box = objects[i]->bounding_box();
+      parent_bounding_box = BoundingBox<T>(parent_bounding_box, box);
 
       entries.push_back(BuildEntry{
           box,
@@ -62,13 +91,7 @@ public:
       });
     }
 
-    _bounding_box = entries.front().box;
-
-    for (size_t k = 1; k < span; ++k) {
-      _bounding_box = BoundingBox<T>(_bounding_box, entries[k].box);
-    }
-
-    const T parent_surface_area = _bounding_box.surface_area();
+    const T parent_surface_area = parent_bounding_box.surface_area();
 
     assert(std::isfinite(parent_surface_area) && parent_surface_area > T{0});
 
@@ -95,12 +118,15 @@ public:
     for (int axis = 0; axis < 3; ++axis) {
       std::sort(entries.begin(), entries.end(), comparator_for_axis(axis));
 
+      // Build suffix bounds: right_boxes[k] encloses entries [k, span).
       right_boxes[span - 1] = entries[span - 1].box;
 
       for (size_t k = span - 1; k > 0; --k) {
         right_boxes[k - 1] = BoundingBox<T>(entries[k - 1].box, right_boxes[k]);
       }
 
+      // Start the left-side bounds with the first entry; expand as the split
+      // advances.
       BoundingBox<T> left_box = entries[0].box;
 
       for (size_t k = 1; k < span; ++k) {
@@ -131,15 +157,14 @@ public:
     const T split_cost = C_trav + C_isect * lowest_sah;
 
     if (leaf_cost <= split_cost) {
-      auto leaf = std::make_unique<HittableList<T>>();
-      leaf->objects.reserve(span);
+      size_t primitive_index = primitives.size();
 
       for (size_t i = start; i < end; ++i) {
-        leaf->add(std::move(objects[i]));
+        primitives.push_back(std::move(objects[i]));
       }
 
-      left = std::move(leaf);
-      // right stays null
+      nodes.push_back(BVHEntry{parent_bounding_box, 0, primitive_index, span});
+
       return;
     }
 
@@ -156,37 +181,82 @@ public:
       objects[start + k] = std::move(reordered[k]);
     }
 
-    left = std::make_unique<BVHNode<T>>(objects, start, best_split_point);
+    // Append the parent before any of the subtrees.
+    const size_t current_entry_index = nodes.size();
+    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0, 0});
 
-    right = std::make_unique<BVHNode<T>>(objects, best_split_point, end);
+    // The left child's root is now at current_entry_index + 1.
+    build(objects, start, best_split_point);
 
-    _bounding_box = BoundingBox<T>(left->bounding_box(), right->bounding_box());
+    // The right child's root will be at the next available position.
+    const size_t right_index = nodes.size();
+    build(objects, best_split_point, end);
+
+    // Use the index: recursive appends may have invalidated references.
+    nodes[current_entry_index].right_child = right_index;
   }
 
-  //
-  // END CONSTRUCTORS
-  //
+public:
+  BVHNode(HittableList<T> objects)
+      : BVHNode(objects.objects, 0, objects.objects.size()) {}
+
+  BVHNode(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
+          size_t end) {
+
+    assert(start < end);
+    assert(end <= objects.size());
+    primitives.reserve(end - start);
+    build(objects, start, end);
+  }
 
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const override {
-    return _bounding_box;
+    return nodes.front().box;
   }
 
   [[nodiscard]] std::optional<HitRecord<T>>
   hit(const Ray<T> &r, Interval<T> interval) const override {
 
-    if (!_bounding_box.hit(r, interval))
-      return std::nullopt;
+    auto &stack = traversal_stack;
+    stack.clear();
+    stack.push_back(0);
 
-    std::optional<HitRecord<T>> left_hit = left->hit(r, interval);
+    std::optional<HitRecord<T>> closest_hit;
 
-    // right can be empty in a one object leaf
-    if (!right)
-      return left_hit;
+    while (!stack.empty()) {
+      const size_t index = stack.back();
+      stack.pop_back();
 
-    const T right_max = left_hit ? left_hit->t : interval.max();
-    std::optional<HitRecord<T>> right_hit =
-        right->hit(r, Interval<T>(interval.min(), right_max));
+      assert(index < nodes.size());
+      const BVHEntry<T> &node = nodes[index];
 
-    return right_hit ? right_hit : left_hit;
+      // Test the box
+      if (!node.box.hit(r, interval))
+        continue;
+
+      // handle a leaf or schedule its children.
+
+      // leaf
+      if (node.primitive_count > 0) {
+        for (size_t i = 0; i < node.primitive_count; ++i) {
+          const size_t primitive_index = node.first_primitive + i;
+
+          if (auto candidate = primitives[primitive_index]->hit(r, interval)) {
+            interval = Interval<T>{interval.min(), candidate->t};
+            closest_hit = candidate;
+          }
+        }
+
+        continue;
+      }
+
+      // Push right first so the left subtree is visited first.
+      assert(node.right_child < nodes.size());
+      assert(index + 1 < nodes.size());
+
+      stack.push_back(node.right_child);
+      stack.push_back(index + 1);
+    }
+
+    return closest_hit;
   }
 };

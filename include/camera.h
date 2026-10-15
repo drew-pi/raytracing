@@ -50,6 +50,33 @@ public:
     std::clog << "\rDone.                   \n";
   }
 
+  [[nodiscard]] Color<T> render_checksum(const Hittable<T> &world,
+                                         bool show_progress = false) {
+    initialize();
+
+    Color<T> checksum(0, 0, 0);
+
+    for (int j = 0; j < image_height; ++j) {
+      if (show_progress) {
+        std::clog << "\rScanlines remaining: " << image_height - j << "     "
+                  << std::flush;
+      }
+
+      for (int i = 0; i < image_width; ++i) {
+        Color<T> pixel_color(0, 0, 0);
+
+        for (int s = 0; s < samples_per_pixel; ++s) {
+          const Ray<T> ray = get_ray(i, j);
+          pixel_color += ray_color(ray, max_depth, world);
+        }
+
+        checksum += pixel_samples_scale * pixel_color;
+      }
+    }
+
+    return checksum;
+  }
+
 private:
   int image_height;
   T pixel_samples_scale; // Color scale factor for a sum of pixel samples
