@@ -19,3 +19,9 @@ target_include_directories(raytracer_bench PRIVATE
 target_include_directories(raytracer PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
+
+foreach(target IN ITEMS raytracer raytracer_bench)
+    target_include_directories(${target} SYSTEM PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pcg-cpp/include"
+    )
+endforeach()

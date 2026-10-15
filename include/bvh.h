@@ -21,6 +21,8 @@ template <std::floating_point T> struct BVHEntry {
 
   size_t first_primitive = 0; // Leaf: start in the shared primitive vector.
   size_t primitive_count = 0; // Zero means internal; positive means leaf.
+
+  int split_axis = 0; // the best axis
 };
 
 template <std::floating_point T> class BVHNode : public Hittable<T> {
@@ -42,7 +44,7 @@ private:
     if (span == 1) {
       size_t primitive_index = primitives.size();
       nodes.push_back(
-          BVHEntry{objects[start]->bounding_box(), 0, primitive_index, 1});
+          BVHEntry{objects[start]->bounding_box(), 0, primitive_index, 1, 0});
       primitives.push_back(std::move(objects[start]));
       return;
     }
@@ -52,7 +54,7 @@ private:
       nodes.push_back(
           BVHEntry{BoundingBox<T>(objects[start]->bounding_box(),
                                   objects[start + 1]->bounding_box()),
-                   0, primitive_left_index, 2});
+                   0, primitive_left_index, 2, 0});
       primitives.push_back(std::move(objects[start]));
       primitives.push_back(std::move(objects[start + 1]));
       return;
@@ -163,7 +165,8 @@ private:
         primitives.push_back(std::move(objects[i]));
       }
 
-      nodes.push_back(BVHEntry{parent_bounding_box, 0, primitive_index, span});
+      nodes.push_back(
+          BVHEntry{parent_bounding_box, 0, primitive_index, span, 0});
 
       return;
     }
@@ -183,7 +186,7 @@ private:
 
     // Append the parent before any of the subtrees.
     const size_t current_entry_index = nodes.size();
-    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0, 0});
+    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0, 0, best_axis});
 
     // The left child's root is now at current_entry_index + 1.
     build(objects, start, best_split_point);
@@ -221,6 +224,7 @@ public:
     stack.push_back(0);
 
     std::optional<HitRecord<T>> closest_hit;
+    const auto axis_direction_inv = r.invert_direction();
 
     while (!stack.empty()) {
       const size_t index = stack.back();
@@ -230,7 +234,7 @@ public:
       const BVHEntry<T> &node = nodes[index];
 
       // Test the box
-      if (!node.box.hit(r, interval))
+      if (!node.box.hit(r, interval, axis_direction_inv))
         continue;
 
       // handle a leaf or schedule its children.
@@ -253,8 +257,21 @@ public:
       assert(node.right_child < nodes.size());
       assert(index + 1 < nodes.size());
 
-      stack.push_back(node.right_child);
-      stack.push_back(index + 1);
+      // stack.push_back(node.right_child);
+      // stack.push_back(index + 1);
+
+      // Heuristic for skipping less likely subtrees
+      //
+      // Try the lower-coordinate child first for positive directions, and the
+      // higher-coordinate child first for negative directions. Push order is
+      // reversed because the stack is LIFO.
+      if (r.direction()[node.split_axis] < T{0}) {
+        stack.push_back(index + 1); // Left deferred.
+        stack.push_back(node.right_child);
+      } else {
+        stack.push_back(node.right_child); // Right deferred.
+        stack.push_back(index + 1);
+      }
     }
 
     return closest_hit;

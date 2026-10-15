@@ -140,10 +140,21 @@ def main():
         action="store_true",
         help="use the existing build-profile executable",
     )
+    parser.add_argument(
+        "--name",
+        help="run label used in the results directory name (e.g. cached-stack)",
+    )
     args = parser.parse_args()
 
     if args.runs < 1:
         parser.error("--runs must be at least 1")
+
+    if args.name is not None and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*", args.name
+    ):
+        parser.error(
+            "--name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'"
+        )
 
     if not args.skip_build:
         build()
@@ -152,7 +163,8 @@ def main():
 
     results_root = ROOT / "benchmark-results"
     results_root.mkdir(exist_ok=True)
-    results_dir = Path(tempfile.mkdtemp(prefix="run-", dir=results_root))
+    prefix = f"run-{args.name}-" if args.name else "run-"
+    results_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=results_root))
     csv_path = results_dir / "timings.csv"
 
     print(f"\nExecutable: {executable}")

@@ -82,9 +82,8 @@ public:
     return y.size() > z.size() ? 1 : 2;
   }
 
-  // constexpr bool hit(const Ray<T> &ray, Interval<T> interval,
-  //                    const T axis_direction_inv) const noexcept {
-  constexpr bool hit(const Ray<T> &ray, Interval<T> interval) const noexcept {
+  constexpr bool hit(const Ray<T> &ray, Interval<T> interval,
+                     const vec3<T> axis_direction_inv) const noexcept {
 
     for (int axis = 0; axis < 3; axis++) {
       const Interval<T> &a = get_axis(axis);
@@ -104,10 +103,8 @@ public:
         continue;
       }
 
-      const T axis_direction_inv = T{1} / direction;
-
-      T t0 = (a.min() - origin) * axis_direction_inv;
-      T t1 = (a.max() - origin) * axis_direction_inv;
+      T t0 = (a.min() - origin) * axis_direction_inv[axis];
+      T t1 = (a.max() - origin) * axis_direction_inv[axis];
 
       // lower bound can only increase, upper bound can only decrease
       interval.minimum = std::max(interval.min(), std::min(t0, t1));
