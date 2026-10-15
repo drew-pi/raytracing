@@ -80,14 +80,22 @@ public:
 
   static constexpr T minimum_length_squared = std::numeric_limits<T>::min();
 
+  // [[nodiscard]] static vec3<T> random_unit_vector() {
+  //   while (true) {
+  //     vec3<T> p = random(-1, 1);
+  //     auto lensq = p.squared_norm();
+  //     if (minimum_length_squared < lensq && lensq <= 1) {
+  //       return p / std::sqrt(lensq);
+  //     }
+  //   }
+  // }
+
+  // Utilizes Marsaglia’s sphere method
   [[nodiscard]] static vec3<T> random_unit_vector() {
-    while (true) {
-      vec3<T> p = random(-1, 1);
-      auto lensq = p.squared_norm();
-      if (minimum_length_squared < lensq && lensq <= 1) {
-        return p / std::sqrt(lensq);
-      }
-    }
+    const T z = random_real<T>(-1, 1);
+    const T phi = random_real<T>(0, 2 * std::numbers::pi_v<T>);
+    const T r = std::sqrt(T{1} - z * z);
+    return {r * std::cos(phi), r * std::sin(phi), z};
   }
 
   [[nodiscard]] static vec3<T> random_on_hemisphere(const vec3<T> &normal) {

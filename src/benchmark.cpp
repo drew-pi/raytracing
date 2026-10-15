@@ -6,6 +6,8 @@
 #include <utility>
 
 int main() {
+  rng::seed(12345, 0);
+
   using Clock = std::chrono::steady_clock;
 
   const auto t0 = Clock::now();

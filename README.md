@@ -59,6 +59,10 @@ Reuse the existing executable.
 
 `python3 benchmark.py --runs 10 --skip-build`
 
+Change the name of the save folder
+
+`python3 benchmark.py --runs 10 --name saved-folder
+
 ### Profiling
 
 Run to allow for profiling (somewhat dangerous so want to set it back to default afterwards)

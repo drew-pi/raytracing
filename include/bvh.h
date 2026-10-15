@@ -14,15 +14,25 @@
 #include <utility>
 #include <vector>
 
+// template <std::floating_point T> struct BVHEntry { // 80 bytes per node
+//   BoundingBox<T> box;
+
+//   size_t right_child = 0; // Internal: left child is this node's index + 1.
+
+//   size_t first_primitive = 0; // Leaf: start in the shared primitive vector.
+//   size_t primitive_count = 0; // Zero means internal; positive means leaf.
+
+//   int split_axis = 0; // the best axis
+// };
+
 template <std::floating_point T> struct BVHEntry {
   BoundingBox<T> box;
 
-  size_t right_child = 0; // Internal: left child is this node's index + 1.
-
-  size_t first_primitive = 0; // Leaf: start in the shared primitive vector.
-  size_t primitive_count = 0; // Zero means internal; positive means leaf.
-
-  int split_axis = 0; // the best axis
+  // Combines two pieces of data (never both so this is fine)
+  // internal: right-child index. leaf: first-primitive index.
+  size_t offset = 0;
+  std::uint32_t primitive_count = 0;
+  std::uint8_t split_axis = 0;
 };
 
 template <std::floating_point T> class BVHNode : public Hittable<T> {
@@ -44,7 +54,7 @@ private:
     if (span == 1) {
       size_t primitive_index = primitives.size();
       nodes.push_back(
-          BVHEntry{objects[start]->bounding_box(), 0, primitive_index, 1, 0});
+          BVHEntry{objects[start]->bounding_box(), primitive_index, 1, 0});
       primitives.push_back(std::move(objects[start]));
       return;
     }
@@ -52,9 +62,9 @@ private:
     if (span == 2) {
       size_t primitive_left_index = primitives.size();
       nodes.push_back(
-          BVHEntry{BoundingBox<T>(objects[start]->bounding_box(),
-                                  objects[start + 1]->bounding_box()),
-                   0, primitive_left_index, 2, 0});
+          BVHEntry<T>{BoundingBox<T>(objects[start]->bounding_box(),
+                                     objects[start + 1]->bounding_box()),
+                      primitive_left_index, 2, 0});
       primitives.push_back(std::move(objects[start]));
       primitives.push_back(std::move(objects[start + 1]));
       return;
@@ -165,8 +175,9 @@ private:
         primitives.push_back(std::move(objects[i]));
       }
 
-      nodes.push_back(
-          BVHEntry{parent_bounding_box, 0, primitive_index, span, 0});
+      assert(span < std::numeric_limits<std::uint32_t>::max());
+      nodes.push_back(BVHEntry<T>{parent_bounding_box, primitive_index,
+                                  static_cast<std::uint32_t>(span), 0});
 
       return;
     }
@@ -186,7 +197,8 @@ private:
 
     // Append the parent before any of the subtrees.
     const size_t current_entry_index = nodes.size();
-    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0, 0, best_axis});
+    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0,
+                                static_cast<std::uint8_t>(best_axis)});
 
     // The left child's root is now at current_entry_index + 1.
     build(objects, start, best_split_point);
@@ -196,7 +208,7 @@ private:
     build(objects, best_split_point, end);
 
     // Use the index: recursive appends may have invalidated references.
-    nodes[current_entry_index].right_child = right_index;
+    nodes[current_entry_index].offset = right_index;
   }
 
 public:
@@ -221,57 +233,63 @@ public:
 
     auto &stack = traversal_stack;
     stack.clear();
-    stack.push_back(0);
 
     std::optional<HitRecord<T>> closest_hit;
     const auto axis_direction_inv = r.invert_direction();
 
-    while (!stack.empty()) {
-      const size_t index = stack.back();
-      stack.pop_back();
+    size_t index = 0;
 
+    while (true) {
       assert(index < nodes.size());
       const BVHEntry<T> &node = nodes[index];
 
       // Test the box
-      if (!node.box.hit(r, interval, axis_direction_inv))
-        continue;
+      if (node.box.hit(r, interval, axis_direction_inv)) {
 
-      // handle a leaf or schedule its children.
+        // internal node
+        if (node.primitive_count == 0) {
+          assert(node.offset < nodes.size());
+          assert(index + 1 < nodes.size());
+          assert(node.split_axis < 3);
 
-      // leaf
-      if (node.primitive_count > 0) {
+          const size_t left = index + 1;
+          const size_t right = node.offset;
+
+          // Defer one child; visit the preferred child without a push/pop pair.
+
+          // Heuristic for skipping less likely subtrees
+          //
+          // Try the lower-coordinate child first for positive directions, and
+          // the higher-coordinate child first for negative directions. Push
+          // order is reversed because the stack is LIFO.
+          if (r.direction()[node.split_axis] < T{0}) {
+            stack.push_back(left);
+            index = right;
+          } else {
+            stack.push_back(right);
+            index = left;
+          }
+
+          continue;
+        }
+
+        // leaf
         for (size_t i = 0; i < node.primitive_count; ++i) {
-          const size_t primitive_index = node.first_primitive + i;
+          const size_t primitive_index = node.offset + i;
 
           if (auto candidate = primitives[primitive_index]->hit(r, interval)) {
             interval = Interval<T>{interval.min(), candidate->t};
             closest_hit = candidate;
           }
         }
-
-        continue;
       }
 
-      // Push right first so the left subtree is visited first.
-      assert(node.right_child < nodes.size());
-      assert(index + 1 < nodes.size());
+      // A miss or completed leaf finishes this branch.
+      if (stack.empty())
+        break;
 
-      // stack.push_back(node.right_child);
-      // stack.push_back(index + 1);
-
-      // Heuristic for skipping less likely subtrees
-      //
-      // Try the lower-coordinate child first for positive directions, and the
-      // higher-coordinate child first for negative directions. Push order is
-      // reversed because the stack is LIFO.
-      if (r.direction()[node.split_axis] < T{0}) {
-        stack.push_back(index + 1); // Left deferred.
-        stack.push_back(node.right_child);
-      } else {
-        stack.push_back(node.right_child); // Right deferred.
-        stack.push_back(index + 1);
-      }
+      index = stack.back();
+      stack.pop_back();
     }
 
     return closest_hit;

@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <cassert>
 #include <concepts>
 #include <format>
 #include <iostream>
+#include <vector>
 
 #include <color.h>
 #include <hittable.h>
@@ -17,6 +19,7 @@ public:
   int image_width = 100;
   int samples_per_pixel = 10;
   int max_depth = 10; // Maximum number of ray bounces into scene
+  int tile_size = 32;
 
   T vfov = T{90}; // vertical view angle (field of view)
   point3<T> look_from =
@@ -24,28 +27,36 @@ public:
   point3<T> look_at = point3<T>(0, 0, -1); // the point the camera is looking at
   vec3<T> v_up = vec3<T>(0, 1, 0); // relative up direction for the camera
 
+  // turns a world pixel coordinate into a vector array coordinate
+  size_t get_pixel(const int i, const int j) {
+    return static_cast<size_t>(j) * image_width + i;
+  }
+
   void render(const Hittable<T> &world) {
     initialize();
+
+    const int tile_columns = (image_width + tile_size - 1) / tile_size;
+    const int tile_rows = (image_height + tile_size - 1) / tile_size;
+
+    std::vector<Color<T>> buffer(static_cast<size_t>(image_width) *
+                                 static_cast<size_t>(image_height));
+
+    for (auto j = 0; j < tile_rows; ++j) {
+
+      for (auto i = 0; i < tile_columns; ++i) {
+
+        std::clog << std::format("\nTiles remaining: {} ",
+                                 ((tile_rows - j) * tile_columns) - i);
+
+        render_tile(i, j, world, buffer);
+      }
+    }
 
     // rendering
     std::cout << std::format("P3\n{} {}\n255\n", image_width, image_height);
 
-    for (auto j = 0; j < image_height; j++) {
-
-      std::clog << std::format("\rScanlines remaining: {} ", image_height - j);
-
-      for (auto i = 0; i < image_width; i++) {
-
-        Color<T> pixel_color(0, 0, 0);
-
-        for (auto s = 0; s < samples_per_pixel; s += 1) {
-          Ray r = get_ray(i, j);
-          pixel_color += ray_color(r, max_depth, world);
-        }
-
-        write_color(std::cout, pixel_samples_scale * pixel_color);
-      }
-    }
+    for (const auto &pixel : buffer)
+      write_color(std::cout, pixel);
 
     std::clog << "\rDone.                   \n";
   }
@@ -54,25 +65,23 @@ public:
                                          bool show_progress = false) {
     initialize();
 
-    Color<T> checksum(0, 0, 0);
+    const int tile_columns = (image_width + tile_size - 1) / tile_size;
+    const int tile_rows = (image_height + tile_size - 1) / tile_size;
 
-    for (int j = 0; j < image_height; ++j) {
-      if (show_progress) {
-        std::clog << "\rScanlines remaining: " << image_height - j << "     "
-                  << std::flush;
-      }
+    std::vector<Color<T>> buffer(static_cast<size_t>(image_width) *
+                                 static_cast<size_t>(image_height));
 
-      for (int i = 0; i < image_width; ++i) {
-        Color<T> pixel_color(0, 0, 0);
-
-        for (int s = 0; s < samples_per_pixel; ++s) {
-          const Ray<T> ray = get_ray(i, j);
-          pixel_color += ray_color(ray, max_depth, world);
-        }
-
-        checksum += pixel_samples_scale * pixel_color;
+    for (auto j = 0; j < tile_rows; ++j) {
+      for (auto i = 0; i < tile_columns; ++i) {
+        render_tile(i, j, world, buffer);
       }
     }
+
+    // checksum
+    Color<T> checksum(0, 0, 0);
+
+    for (const auto &pixel : buffer)
+      checksum += pixel;
 
     return checksum;
   }
@@ -128,6 +137,34 @@ private:
     auto viewport_upper_left =
         camera_center - (focal_length * w) - viewport_u / 2 - viewport_v / 2;
     pixel00 = viewport_upper_left + pixel_delta_u / 2 + pixel_delta_v / 2;
+  }
+
+  void render_tile(const int column, const int row, const Hittable<T> &world,
+                   std::vector<Color<T>> &buffer) {
+
+    const int x_begin = column * tile_size;
+    const int y_begin = row * tile_size;
+
+    const int x_end = std::min(x_begin + tile_size, image_width);
+    const int y_end = std::min(y_begin + tile_size, image_height);
+
+    assert(x_begin >= 0 && x_begin < image_width);
+    assert(y_begin >= 0 && y_begin < image_height);
+
+    for (auto j = y_begin; j < y_end; ++j) {
+
+      for (auto i = x_begin; i < x_end; i++) {
+
+        Color<T> pixel_color(0, 0, 0);
+
+        for (auto s = 0; s < samples_per_pixel; s += 1) {
+          Ray r = get_ray(i, j);
+          pixel_color += ray_color(r, max_depth, world);
+        }
+
+        buffer[get_pixel(i, j)] = pixel_samples_scale * pixel_color;
+      }
+    }
   }
 
   [[nodiscard]] vec3<T> sample_square() const {
