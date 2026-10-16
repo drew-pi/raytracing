@@ -61,7 +61,15 @@ Reuse the existing executable.
 
 Change the name of the save folder
 
-`python3 benchmark.py --runs 10 --name saved-folder
+`python3 benchmark.py --runs 10 --name saved-folder`
+
+Use a certain number of threads
+
+`python3 benchmark.py --runs 10 --name saved-folder --threads 4`
+
+Do not save this run to disk
+
+`python3 benchmark.py --runs 1 --threads 1 --no-save`
 
 ### Profiling
 

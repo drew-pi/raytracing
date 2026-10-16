@@ -12,6 +12,7 @@
 #include <color.h>
 #include <hittable.h>
 #include <interval.h>
+#include <scene.h>
 #include <utility.h>
 #include <vec3.h>
 
@@ -34,7 +35,7 @@ public:
     return static_cast<size_t>(j) * image_width + i;
   }
 
-  void tile_renderer(const Hittable<T> &world) {
+  void tile_renderer(const Scene<T> &scene) {
     assert(tile_size > 0);
     initialize();
 
@@ -50,7 +51,7 @@ public:
                   << (static_cast<size_t>(tile_rows - j) * tile_columns - i)
                   << "     " << std::flush;
 
-        render_tile(i, j, world, buffer);
+        render_tile(i, j, scene, buffer);
       }
     }
 
@@ -62,7 +63,7 @@ public:
     std::clog << "\rDone.                   \n";
   }
 
-  void render_multi_thread(const Hittable<T> &world, const int thread_count) {
+  void render_multi_thread(const Scene<T> &scene, const int thread_count) {
     assert(thread_count > 0);
 
     initialize();
@@ -95,7 +96,7 @@ public:
         const int column = static_cast<int>(tile % tile_columns);
         const int row = static_cast<int>(tile / tile_columns);
 
-        render_tile(column, row, world, buffer);
+        render_tile(column, row, scene, buffer);
         completed_tiles.fetch_add(1, std::memory_order_relaxed);
       }
     };
@@ -129,7 +130,7 @@ public:
     std::clog << "\rDone.                   \n";
   }
 
-  [[nodiscard]] Color<T> render_checksum(const Hittable<T> &world,
+  [[nodiscard]] Color<T> render_checksum(const Scene<T> &scene,
                                          const int thread_count,
                                          bool show_progress = false) {
     assert(thread_count > 0);
@@ -164,7 +165,7 @@ public:
         const int column = static_cast<int>(tile % tile_columns);
         const int row = static_cast<int>(tile / tile_columns);
 
-        render_tile(column, row, world, buffer);
+        render_tile(column, row, scene, buffer);
         completed_tiles.fetch_add(1, std::memory_order_relaxed);
       }
     };
@@ -254,7 +255,7 @@ private:
     pixel00 = viewport_upper_left + pixel_delta_u / 2 + pixel_delta_v / 2;
   }
 
-  void render_tile(const int column, const int row, const Hittable<T> &world,
+  void render_tile(const int column, const int row, const Scene<T> &scene,
                    std::vector<Color<T>> &buffer) {
 
     const int x_begin = column * tile_size;
@@ -274,7 +275,7 @@ private:
 
         for (auto s = 0; s < samples_per_pixel; s += 1) {
           Ray r = get_ray(i, j);
-          pixel_color += ray_color(r, max_depth, world);
+          pixel_color += ray_color(r, max_depth, scene);
         }
 
         buffer[get_pixel(i, j)] = pixel_samples_scale * pixel_color;
@@ -302,7 +303,7 @@ private:
   }
 
   [[nodiscard]] Color<T> ray_color(const Ray<T> &r, int depth,
-                                   const Hittable<T> &world) const {
+                                   const Scene<T> &scene) const {
 
     // for recursive calls, if exceeded max depth, no more light is accumilated
     if (depth <= 0) {
@@ -312,14 +313,14 @@ private:
     auto interval = Interval<T>::standard();
 
     // candidate hit record - candidate because it is an optional
-    if (auto candidate_hit = world.hit(r, interval)) {
+    if (auto candidate_hit = scene.hit(r, interval)) {
 
       // scatter candidate because some materials can absorb all of the light
       // (optional type)
       if (auto scatter_candidate =
               candidate_hit->material.get().scatter(r, candidate_hit.value())) {
         return scatter_candidate->attenuation *
-               ray_color(scatter_candidate->scattered, depth - 1, world);
+               ray_color(scatter_candidate->scattered, depth - 1, scene);
       }
 
       return Color<T>(0, 0, 0);

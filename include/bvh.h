@@ -14,18 +14,7 @@
 #include <utility>
 #include <vector>
 
-// template <std::floating_point T> struct BVHEntry { // 80 bytes per node
-//   BoundingBox<T> box;
-
-//   size_t right_child = 0; // Internal: left child is this node's index + 1.
-
-//   size_t first_primitive = 0; // Leaf: start in the shared primitive vector.
-//   size_t primitive_count = 0; // Zero means internal; positive means leaf.
-
-//   int split_axis = 0; // the best axis
-// };
-
-template <std::floating_point T> struct BVHEntry {
+template <std::floating_point T> struct BVHNode {
   BoundingBox<T> box;
 
   // Combines two pieces of data (never both so this is fine)
@@ -35,10 +24,10 @@ template <std::floating_point T> struct BVHEntry {
   std::uint8_t split_axis = 0;
 };
 
-template <std::floating_point T> class BVHNode : public Hittable<T> {
+template <std::floating_point T> class BVH {
 
 private:
-  std::vector<BVHEntry<T>> nodes;
+  std::vector<BVHNode<T>> nodes;
   std::vector<std::unique_ptr<Hittable<T>>> primitives;
 
   void build(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
@@ -53,7 +42,7 @@ private:
     if (span == 1) {
       size_t primitive_index = primitives.size();
       nodes.push_back(
-          BVHEntry{objects[start]->bounding_box(), primitive_index, 1, 0});
+          BVHNode{objects[start]->bounding_box(), primitive_index, 1, 0});
       primitives.push_back(std::move(objects[start]));
       return;
     }
@@ -61,9 +50,9 @@ private:
     if (span == 2) {
       size_t primitive_left_index = primitives.size();
       nodes.push_back(
-          BVHEntry<T>{BoundingBox<T>(objects[start]->bounding_box(),
-                                     objects[start + 1]->bounding_box()),
-                      primitive_left_index, 2, 0});
+          BVHNode<T>{BoundingBox<T>(objects[start]->bounding_box(),
+                                    objects[start + 1]->bounding_box()),
+                     primitive_left_index, 2, 0});
       primitives.push_back(std::move(objects[start]));
       primitives.push_back(std::move(objects[start + 1]));
       return;
@@ -175,8 +164,8 @@ private:
       }
 
       assert(span < std::numeric_limits<std::uint32_t>::max());
-      nodes.push_back(BVHEntry<T>{parent_bounding_box, primitive_index,
-                                  static_cast<std::uint32_t>(span), 0});
+      nodes.push_back(BVHNode<T>{parent_bounding_box, primitive_index,
+                                 static_cast<std::uint32_t>(span), 0});
 
       return;
     }
@@ -196,8 +185,8 @@ private:
 
     // Append the parent before any of the subtrees.
     const size_t current_entry_index = nodes.size();
-    nodes.push_back(BVHEntry<T>{parent_bounding_box, 0, 0,
-                                static_cast<std::uint8_t>(best_axis)});
+    nodes.push_back(BVHNode<T>{parent_bounding_box, 0, 0,
+                               static_cast<std::uint8_t>(best_axis)});
 
     // The left child's root is now at current_entry_index + 1.
     build(objects, start, best_split_point);
@@ -211,11 +200,11 @@ private:
   }
 
 public:
-  BVHNode(HittableList<T> objects)
-      : BVHNode(objects.objects, 0, objects.objects.size()) {}
+  BVH(HittableList<T> objects)
+      : BVH(objects.objects, 0, objects.objects.size()) {}
 
-  BVHNode(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
-          size_t end) {
+  BVH(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
+      size_t end) {
 
     assert(start < end);
     assert(end <= objects.size());
@@ -223,13 +212,15 @@ public:
     build(objects, start, end);
   }
 
-  [[nodiscard]] constexpr BoundingBox<T> bounding_box() const override {
+  [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {
     return nodes.front().box;
   }
 
-  [[nodiscard]] std::optional<HitRecord<T>>
-  hit(const Ray<T> &r, Interval<T> interval) const override {
+  [[nodiscard]] std::optional<HitRecord<T>> hit(const Ray<T> &r,
+                                                Interval<T> interval) const {
 
+    // Each thread gets its own persistent stack, reused across calls.
+    // clear() removes elements but preserves capacity to avoid reallocations.
     thread_local std::vector<size_t> stack;
     stack.clear();
 
@@ -240,7 +231,7 @@ public:
 
     while (true) {
       assert(index < nodes.size());
-      const BVHEntry<T> &node = nodes[index];
+      const BVHNode<T> &node = nodes[index];
 
       // Test the box
       if (node.box.hit(r, interval, axis_direction_inv)) {

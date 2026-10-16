@@ -1,7 +1,9 @@
+#pragma once
+
 #include <cmath>
 #include <memory>
 #include <numbers>
-#include <string_view>
+#include <tuple>
 
 #include <camera.h>
 #include <hittable_list.h>
@@ -9,7 +11,10 @@
 #include <sphere.h>
 #include <vec3.h>
 
-int main(int argc, char *argv[]) {
+using BenchmarkSetup = std::tuple<Camera<double>, HittableList<double>>;
+
+[[nodiscard]] inline BenchmarkSetup create_scene() {
+
   HittableList<double> world;
 
   auto diffuse = [&](point3<double> center, double radius,
@@ -98,10 +103,5 @@ int main(int argc, char *argv[]) {
   camera.look_at = point3<double>(0, 2.2, -5.5);
   camera.v_up = vec3<double>(0, 1, 0);
 
-  if (argc > 1 && std::string_view(argv[1]) == "preview") {
-    camera.image_width = 360;
-    camera.samples_per_pixel = 12;
-  }
-
-  camera.render(world);
+  return std::make_tuple(std::move(camera), std::move(world));
 }

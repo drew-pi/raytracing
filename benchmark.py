@@ -7,6 +7,7 @@ import re
 import statistics
 import subprocess
 import tempfile
+from contextlib import nullcontext
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -62,7 +63,9 @@ def find_executable():
 
 
 def run_trial(executable, log_path, thread_count):
-    with log_path.open("wb") as log:
+    with (
+        log_path.open("wb") if log_path is not None else nullcontext(subprocess.PIPE)
+    ) as log:
         result = subprocess.run(
             [str(executable), str(thread_count)],
             cwd=ROOT,
@@ -70,19 +73,21 @@ def run_trial(executable, log_path, thread_count):
             stderr=log,
         )
 
+    text = (
+        log_path.read_text(errors="replace")
+        if log_path is not None
+        else result.stderr.decode(errors="replace")
+    )
+    details = (
+        f"see {log_path}" if log_path is not None else f"benchmark output:\n{text}"
+    )
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Benchmark exited with code {result.returncode}; see {log_path}"
-        )
-
-    text = log_path.read_text(errors="replace")
+        raise RuntimeError(f"Benchmark exited with code {result.returncode}; {details}")
     checksums = list(CHECKSUM_PATTERN.finditer(text))
     timings = list(TIMING_PATTERN.finditer(text))
 
     if len(checksums) != 1 or len(timings) != 1:
-        raise RuntimeError(
-            f"Expected exactly one checksum and timing row; see {log_path}"
-        )
+        raise RuntimeError(f"Expected exactly one checksum and timing row; {details}")
 
     checksum = checksums[0].groups()
 
@@ -90,19 +95,19 @@ def run_trial(executable, log_path, thread_count):
         checksum_values = [float(value) for value in checksum]
         times = [float(value.strip()) for value in timings[0].group(1).split(",")]
     except ValueError as error:
-        raise RuntimeError(f"Invalid numeric output; see {log_path}") from error
+        raise RuntimeError(f"Invalid numeric output; {details}") from error
 
     if not all(math.isfinite(value) for value in checksum_values):
-        raise RuntimeError(f"Nonfinite checksum; see {log_path}")
+        raise RuntimeError(f"Nonfinite checksum; {details}")
 
     if len(times) != 3 or not all(
         math.isfinite(value) and value >= 0 for value in times
     ):
-        raise RuntimeError(f"Invalid phase timings; see {log_path}")
+        raise RuntimeError(f"Invalid phase timings; {details}")
 
     total = sum(times)
     if not math.isfinite(total):
-        raise RuntimeError(f"Nonfinite total timing; see {log_path}")
+        raise RuntimeError(f"Nonfinite total timing; {details}")
 
     return checksum, [*times, total]
 
@@ -155,6 +160,11 @@ def main():
         "--name",
         help="run label used in the results directory name (e.g. cached-stack)",
     )
+    parser.add_argument(
+        "--no-save",
+        action="store_true",
+        help="print results without saving CSV or logs (asks for confirmation)",
+    )
     args = parser.parse_args()
 
     if args.runs < 1:
@@ -171,20 +181,46 @@ def main():
             "letters, digits, '.', '_' or '-'"
         )
 
+    if args.no_save:
+        while True:
+            try:
+                answer = (
+                    input(
+                        "Results and trial logs will NOT be saved. Are you sure? [y/N]: "
+                    )
+                    .strip()
+                    .lower()
+                )
+            except EOFError:
+                answer = "no"
+            if answer in ("", "n", "no"):
+                print("Benchmark cancelled.")
+                return
+            if answer in ("y", "yes"):
+                break
+            print("Please enter yes or no.")
+
     if not args.skip_build:
         build()
 
     executable = find_executable()
 
-    results_root = ROOT / "benchmark-results"
-    results_root.mkdir(exist_ok=True)
-    prefix = f"run-{args.name}-" if args.name else "run-"
-    results_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=results_root))
-    csv_path = results_dir / "timings.csv"
+    results_dir = None
+    csv_path = None
+    if not args.no_save:
+        results_root = ROOT / "benchmark-results"
+        results_root.mkdir(exist_ok=True)
+        prefix = f"run-{args.name}-" if args.name else "run-"
+        results_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=results_root))
+        csv_path = results_dir / "timings.csv"
 
     print(f"\nExecutable: {executable}")
     print(f"Threads:    {args.threads}")
-    print(f"Results:    {results_dir}")
+    print(
+        f"Results:    {results_dir if results_dir is not None else 'console only (not saved)'}"
+    )
+    if args.name:
+        print(f"Name:       {args.name}")
 
     if args.threads > 1:
         print(
@@ -197,32 +233,42 @@ def main():
     checksum_mismatches = 0
     rows = []
 
-    with csv_path.open("w", newline="") as output:
-        writer = csv.writer(output)
-        writer.writerow(
-            [
-                "run",
-                "threads",
-                "checksum_r",
-                "checksum_g",
-                "checksum_b",
-                "scene_ms",
-                "build_ms",
-                "render_ms",
-                "total_ms",
-            ]
-        )
+    with (
+        csv_path.open("w", newline="") if csv_path is not None else nullcontext()
+    ) as output:
+        writer = csv.writer(output) if output is not None else None
+        if writer is not None:
+            writer.writerow(
+                [
+                    "run",
+                    "threads",
+                    "checksum_r",
+                    "checksum_g",
+                    "checksum_b",
+                    "scene_ms",
+                    "build_ms",
+                    "render_ms",
+                    "total_ms",
+                ]
+            )
 
         for trial in range(1, args.runs + 1):
             print(f"\n[{trial}/{args.runs}] Running...", flush=True)
 
-            log_path = results_dir / f"trial-{trial:03d}.log"
+            log_path = (
+                results_dir / f"trial-{trial:03d}.log"
+                if results_dir is not None
+                else None
+            )
             checksum, times = run_trial(executable, log_path, args.threads)
 
             # Save the trial even if its checksum subsequently fails validation.
             rows.append(times)
-            writer.writerow([trial, args.threads, *checksum, *times])
-            output.flush()
+            if writer is not None:
+                writer.writerow([trial, args.threads, *checksum, *times])
+                output.flush()
+            else:
+                print(f"Checksum: {' '.join(checksum)}")
 
             if reference_checksum is None:
                 reference_checksum = checksum
@@ -232,7 +278,11 @@ def main():
                     f"Checksum mismatch on trial {trial}!\n"
                     f"Expected: {' '.join(reference_checksum)}\n"
                     f"Actual:   {' '.join(checksum)}\n"
-                    f"See {log_path}"
+                    + (
+                        f"See {log_path}"
+                        if log_path is not None
+                        else "No trial log was saved."
+                    )
                 )
 
                 if args.threads == 1:
@@ -258,7 +308,8 @@ def main():
 
     summarize(rows)
     print("\nTotal is scene + build + render, not process wall-clock time.")
-    print(f"Raw timings: {csv_path}")
+    if csv_path is not None:
+        print(f"Raw timings: {csv_path}")
 
 
 if __name__ == "__main__":

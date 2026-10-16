@@ -1,5 +1,5 @@
-#include "scene.h"
-#include <bvh.h>
+#include "benchmark_scene.h"
+#include <scene.h>
 
 #include <charconv>
 #include <chrono>
@@ -34,10 +34,10 @@ int main(int argc, char *argv[]) {
   auto [camera, world] = create_scene();
 
   const auto t1 = Clock::now();
-  BVHNode<double> bvh(std::move(world));
+  Scene<double> scene(std::move(world));
 
   const auto t2 = Clock::now();
-  const auto checksum = camera.render_checksum(bvh, thread_count, false);
+  const auto checksum = camera.render_checksum(scene, thread_count, false);
   // camera.render(bvh);
   const auto t3 = Clock::now();
 
