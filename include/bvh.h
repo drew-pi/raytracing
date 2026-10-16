@@ -40,7 +40,6 @@ template <std::floating_point T> class BVHNode : public Hittable<T> {
 private:
   std::vector<BVHEntry<T>> nodes;
   std::vector<std::unique_ptr<Hittable<T>>> primitives;
-  mutable std::vector<size_t> traversal_stack;
 
   void build(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
              size_t end) {
@@ -231,7 +230,7 @@ public:
   [[nodiscard]] std::optional<HitRecord<T>>
   hit(const Ray<T> &r, Interval<T> interval) const override {
 
-    auto &stack = traversal_stack;
+    thread_local std::vector<size_t> stack;
     stack.clear();
 
     std::optional<HitRecord<T>> closest_hit;

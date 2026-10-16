@@ -61,10 +61,10 @@ def find_executable():
     raise RuntimeError("Cannot find raytracer_bench; build it first.")
 
 
-def run_trial(executable, log_path):
+def run_trial(executable, log_path, thread_count):
     with log_path.open("wb") as log:
         result = subprocess.run(
-            [str(executable)],
+            [str(executable), str(thread_count)],
             cwd=ROOT,
             stdout=subprocess.DEVNULL,
             stderr=log,
@@ -100,7 +100,11 @@ def run_trial(executable, log_path):
     ):
         raise RuntimeError(f"Invalid phase timings; see {log_path}")
 
-    return checksum, [*times, sum(times)]
+    total = sum(times)
+    if not math.isfinite(total):
+        raise RuntimeError(f"Nonfinite total timing; see {log_path}")
+
+    return checksum, [*times, total]
 
 
 def summarize(rows):
@@ -136,6 +140,13 @@ def main():
         help="number of measured runs (default: 5)",
     )
     parser.add_argument(
+        "-t",
+        "--threads",
+        type=int,
+        default=1,
+        help="number of rendering workers (default: 1)",
+    )
+    parser.add_argument(
         "--skip-build",
         action="store_true",
         help="use the existing build-profile executable",
@@ -149,11 +160,15 @@ def main():
     if args.runs < 1:
         parser.error("--runs must be at least 1")
 
+    if not 1 <= args.threads <= 2_147_483_647:
+        parser.error("--threads must be between 1 and 2147483647")
+
     if args.name is not None and not re.fullmatch(
         r"[A-Za-z0-9][A-Za-z0-9._-]*", args.name
     ):
         parser.error(
-            "--name must start with a letter or digit and contain only letters, digits, '.', '_' or '-'"
+            "--name must start with a letter or digit and contain only "
+            "letters, digits, '.', '_' or '-'"
         )
 
     if not args.skip_build:
@@ -168,9 +183,18 @@ def main():
     csv_path = results_dir / "timings.csv"
 
     print(f"\nExecutable: {executable}")
+    print(f"Threads:    {args.threads}")
     print(f"Results:    {results_dir}")
 
+    if args.threads > 1:
+        print(
+            "\nNote: per-worker RNG streams make checksums scheduling-dependent.\n"
+            "Checksum equality will be reported, but not enforced. Finite "
+            "checksums do not establish rendering correctness."
+        )
+
     reference_checksum = None
+    checksum_mismatches = 0
     rows = []
 
     with csv_path.open("w", newline="") as output:
@@ -178,6 +202,7 @@ def main():
         writer.writerow(
             [
                 "run",
+                "threads",
                 "checksum_r",
                 "checksum_g",
                 "checksum_b",
@@ -192,31 +217,48 @@ def main():
             print(f"\n[{trial}/{args.runs}] Running...", flush=True)
 
             log_path = results_dir / f"trial-{trial:03d}.log"
-            checksum, times = run_trial(executable, log_path)
+            checksum, times = run_trial(executable, log_path, args.threads)
+
+            # Save the trial even if its checksum subsequently fails validation.
+            rows.append(times)
+            writer.writerow([trial, args.threads, *checksum, *times])
+            output.flush()
 
             if reference_checksum is None:
                 reference_checksum = checksum
             elif checksum != reference_checksum:
-                raise RuntimeError(
+                checksum_mismatches += 1
+                message = (
                     f"Checksum mismatch on trial {trial}!\n"
                     f"Expected: {' '.join(reference_checksum)}\n"
                     f"Actual:   {' '.join(checksum)}\n"
                     f"See {log_path}"
                 )
 
-            rows.append(times)
-            writer.writerow([trial, *checksum, *times])
-            output.flush()
+                if args.threads == 1:
+                    raise RuntimeError(message)
+
+                print(f"Warning: {message}")
 
             print(
-                f"Checksum OK | scene {times[0]:.3f} ms | "
+                f"Trial complete | scene {times[0]:.3f} ms | "
                 f"build {times[1]:.3f} ms | render {times[2]:.3f} ms | "
                 f"total {times[3]:.3f} ms"
             )
 
-    print(f"\nAll {args.runs} checksums match: {' '.join(reference_checksum)}")
+    if args.threads == 1:
+        print(f"\nAll {args.runs} checksums match: {' '.join(reference_checksum)}")
+    else:
+        print(f"\nCompleted {args.runs} trials with {args.threads} workers.")
+        print(f"Trials differing from the first checksum: {checksum_mismatches}")
+        print(
+            "Multithreaded checksum equality is not enforced; "
+            "all recorded checksums are finite."
+        )
+
     summarize(rows)
-    print(f"\nRaw timings: {csv_path}")
+    print("\nTotal is scene + build + render, not process wall-clock time.")
+    print(f"Raw timings: {csv_path}")
 
 
 if __name__ == "__main__":

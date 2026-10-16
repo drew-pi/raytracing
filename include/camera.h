@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <format>
 #include <iostream>
+#include <thread>
 #include <vector>
 
 #include <color.h>
@@ -32,7 +34,8 @@ public:
     return static_cast<size_t>(j) * image_width + i;
   }
 
-  void render(const Hittable<T> &world) {
+  void tile_renderer(const Hittable<T> &world) {
+    assert(tile_size > 0);
     initialize();
 
     const int tile_columns = (image_width + tile_size - 1) / tile_size;
@@ -41,16 +44,81 @@ public:
     std::vector<Color<T>> buffer(static_cast<size_t>(image_width) *
                                  static_cast<size_t>(image_height));
 
-    for (auto j = 0; j < tile_rows; ++j) {
-
-      for (auto i = 0; i < tile_columns; ++i) {
-
-        std::clog << std::format("\nTiles remaining: {} ",
-                                 ((tile_rows - j) * tile_columns) - i);
+    for (int j = 0; j < tile_rows; ++j) {
+      for (int i = 0; i < tile_columns; ++i) {
+        std::clog << "\rTiles remaining: "
+                  << (static_cast<size_t>(tile_rows - j) * tile_columns - i)
+                  << "     " << std::flush;
 
         render_tile(i, j, world, buffer);
       }
     }
+
+    std::cout << std::format("P3\n{} {}\n255\n", image_width, image_height);
+
+    for (const auto &pixel : buffer)
+      write_color(std::cout, pixel);
+
+    std::clog << "\rDone.                   \n";
+  }
+
+  void render_multi_thread(const Hittable<T> &world, const int thread_count) {
+    assert(thread_count > 0);
+
+    initialize();
+
+    const int tile_columns = (image_width + tile_size - 1) / tile_size;
+    const int tile_rows = (image_height + tile_size - 1) / tile_size;
+
+    std::vector<Color<T>> buffer(static_cast<size_t>(image_width) *
+                                 static_cast<size_t>(image_height));
+
+    std::vector<std::jthread> workers;
+    workers.reserve(thread_count);
+
+    std::atomic<size_t> next_tile{0};
+    std::atomic<size_t> completed_tiles{0};
+
+    const size_t total_tiles = static_cast<size_t>(tile_columns) * tile_rows;
+
+    // thread work
+    auto worker = [&](size_t worker_id) {
+      rng::seed(12345, worker_id);
+
+      while (true) {
+        // Claim a unique tile.
+        const size_t tile = next_tile.fetch_add(1, std::memory_order_relaxed);
+
+        if (tile >= total_tiles)
+          break;
+
+        const int column = static_cast<int>(tile % tile_columns);
+        const int row = static_cast<int>(tile / tile_columns);
+
+        render_tile(column, row, world, buffer);
+        completed_tiles.fetch_add(1, std::memory_order_relaxed);
+      }
+    };
+
+    for (size_t worker_id = 0; worker_id < thread_count; ++worker_id)
+      workers.emplace_back(worker, worker_id);
+
+    // main thread polling
+    while (true) {
+      const size_t completed = completed_tiles.load(std::memory_order_relaxed);
+
+      std::clog << "\rTiles remaining: " << total_tiles - completed << '/'
+                << total_tiles << "     " << std::flush;
+
+      if (completed == total_tiles)
+        break;
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    // join threads before rendering
+    for (auto &thread : workers)
+      thread.join();
 
     // rendering
     std::cout << std::format("P3\n{} {}\n255\n", image_width, image_height);
@@ -62,7 +130,10 @@ public:
   }
 
   [[nodiscard]] Color<T> render_checksum(const Hittable<T> &world,
+                                         const int thread_count,
                                          bool show_progress = false) {
+    assert(thread_count > 0);
+
     initialize();
 
     const int tile_columns = (image_width + tile_size - 1) / tile_size;
@@ -71,11 +142,55 @@ public:
     std::vector<Color<T>> buffer(static_cast<size_t>(image_width) *
                                  static_cast<size_t>(image_height));
 
-    for (auto j = 0; j < tile_rows; ++j) {
-      for (auto i = 0; i < tile_columns; ++i) {
-        render_tile(i, j, world, buffer);
+    std::vector<std::jthread> workers;
+    workers.reserve(thread_count);
+
+    std::atomic<size_t> next_tile{0};
+    std::atomic<size_t> completed_tiles{0};
+
+    const size_t total_tiles = static_cast<size_t>(tile_columns) * tile_rows;
+
+    // thread work
+    auto worker = [&](size_t worker_id) {
+      rng::seed(12345, worker_id);
+
+      while (true) {
+        // Claim a unique tile.
+        const size_t tile = next_tile.fetch_add(1, std::memory_order_relaxed);
+
+        if (tile >= total_tiles)
+          break;
+
+        const int column = static_cast<int>(tile % tile_columns);
+        const int row = static_cast<int>(tile / tile_columns);
+
+        render_tile(column, row, world, buffer);
+        completed_tiles.fetch_add(1, std::memory_order_relaxed);
+      }
+    };
+
+    for (size_t worker_id = 0; worker_id < thread_count; ++worker_id)
+      workers.emplace_back(worker, worker_id);
+
+    // main thread polling if turned on
+    if (show_progress) {
+      while (true) {
+        const size_t completed =
+            completed_tiles.load(std::memory_order_relaxed);
+
+        std::clog << "\rTiles remaining: " << total_tiles - completed << '/'
+                  << total_tiles << "     " << std::flush;
+
+        if (completed == total_tiles)
+          break;
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
       }
     }
+
+    // join threads before rendering
+    for (auto &thread : workers)
+      thread.join();
 
     // checksum
     Color<T> checksum(0, 0, 0);
