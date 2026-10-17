@@ -59,7 +59,7 @@ create_triangle_test_scene() {
       Mesh<double>::make_sphere(Point(-2.5, 0.2 * 0.8506508083520399, -0.45),
                                 0.2, 0, diffuse(Colour(0.85, 0.45, 0.08))));
   meshes.push_back(Mesh<double>::make_sphere(
-      Point(-0.2, 0.3, -0.55), 0.3, 1,
+      Point(-0.2, 0.3, -0.55), 0.3, 3,
       std::make_unique<Metal<double>>(Colour(0.85, 0.65, 0.25))));
   meshes.push_back(Mesh<double>::make_sphere(Point(1.25, 0.45, -1.0), 0.45, 2,
                                              diffuse(Colour(0.12, 0.3, 0.75))));

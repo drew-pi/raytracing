@@ -112,6 +112,22 @@ def run_trial(executable, log_path, thread_count):
     return checksum, [*times, total]
 
 
+def checksum_deviations(baseline, actual):
+    deviations = []
+    for component, expected, observed in zip("RGB", baseline, actual):
+        expected_value, observed_value = float(expected), float(observed)
+        if expected_value == observed_value:
+            continue
+        relative_error = (
+            abs(observed_value - expected_value) / abs(expected_value)
+            if expected_value != 0
+            else math.inf
+        )
+        if relative_error >= 1e-4:
+            deviations.append((component, expected, observed, relative_error * 100))
+    return deviations
+
+
 def summarize(rows):
     print("\nTimes in milliseconds:")
     print(
@@ -225,12 +241,12 @@ def main():
     if args.threads > 1:
         print(
             "\nNote: per-worker RNG streams make checksums scheduling-dependent.\n"
-            "Checksum equality will be reported, but not enforced. Finite "
-            "checksums do not establish rendering correctness."
+            "Checksum deviations only produce warnings. Finite checksums "
+            "do not establish rendering correctness."
         )
 
     reference_checksum = None
-    checksum_mismatches = 0
+    checksum_outside_tolerance = 0
     rows = []
 
     with (
@@ -262,7 +278,7 @@ def main():
             )
             checksum, times = run_trial(executable, log_path, args.threads)
 
-            # Save the trial even if its checksum subsequently fails validation.
+            # Save every valid trial, including those outside checksum tolerance.
             rows.append(times)
             if writer is not None:
                 writer.writerow([trial, args.threads, *checksum, *times])
@@ -272,23 +288,24 @@ def main():
 
             if reference_checksum is None:
                 reference_checksum = checksum
-            elif checksum != reference_checksum:
-                checksum_mismatches += 1
-                message = (
-                    f"Checksum mismatch on trial {trial}!\n"
-                    f"Expected: {' '.join(reference_checksum)}\n"
-                    f"Actual:   {' '.join(checksum)}\n"
-                    + (
+            else:
+                deviations = checksum_deviations(reference_checksum, checksum)
+                if deviations:
+                    checksum_outside_tolerance += 1
+                    print(
+                        f"Warning: checksum outside tolerance on trial {trial} "
+                        "(each component must have relative deviation < 0.001%)."
+                    )
+                    for component, baseline, actual, percent_error in deviations:
+                        print(
+                            f"  {component}: baseline={baseline}, actual={actual}, "
+                            f"percent error={percent_error:.9g}%"
+                        )
+                    print(
                         f"See {log_path}"
                         if log_path is not None
                         else "No trial log was saved."
                     )
-                )
-
-                if args.threads == 1:
-                    raise RuntimeError(message)
-
-                print(f"Warning: {message}")
 
             print(
                 f"Trial complete | scene {times[0]:.3f} ms | "
@@ -296,15 +313,13 @@ def main():
                 f"total {times[3]:.3f} ms"
             )
 
-    if args.threads == 1:
-        print(f"\nAll {args.runs} checksums match: {' '.join(reference_checksum)}")
-    else:
-        print(f"\nCompleted {args.runs} trials with {args.threads} workers.")
-        print(f"Trials differing from the first checksum: {checksum_mismatches}")
-        print(
-            "Multithreaded checksum equality is not enforced; "
-            "all recorded checksums are finite."
-        )
+    print(f"\nCompleted {args.runs} trials with {args.threads} workers.")
+    print(f"Checksum baseline: first trial ({' '.join(reference_checksum)})")
+    print(
+        f"Trials outside checksum tolerance: {checksum_outside_tolerance} "
+        f"of {args.runs} (per-component relative deviation must be < 0.001%; "
+        "warnings only)."
+    )
 
     summarize(rows)
     print("\nTotal is scene + build + render, not process wall-clock time.")

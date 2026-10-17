@@ -29,11 +29,14 @@ public:
 
   std::optional<ScatterRecord<T>>
   scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const override {
-    auto scatter_dir = hit.normal + vec3<T>::random_unit_vector();
+    auto scatter_dir = hit.shading_normal + vec3<T>::random_unit_vector();
 
     // catch degenerate scatter direction if the random unit vector is almost
-    // the exact opposite of the normal at the hit point
-    scatter_dir = scatter_dir.near_zero() ? hit.normal : scatter_dir;
+    // the exact opposite of the shading_normal at the hit point
+    scatter_dir = scatter_dir.near_zero() ? hit.shading_normal : scatter_dir;
+
+    if (dot(scatter_dir, hit.geometric_normal) <= T{0})
+      return std::nullopt;
 
     auto scattered = Ray(hit.p, scatter_dir, ray_in.time());
     auto attenuation = albedo;
@@ -51,7 +54,11 @@ public:
 
   std::optional<ScatterRecord<T>>
   scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const override {
-    vec3<T> reflection = vec3<T>::reflect(ray_in.direction(), hit.normal);
+    vec3<T> reflection =
+        vec3<T>::reflect(ray_in.direction(), hit.shading_normal);
+
+    if (dot(reflection, hit.geometric_normal) <= T{0})
+      return std::nullopt;
 
     auto scattered = Ray(hit.p, reflection, ray_in.time());
     auto attenuation = albedo;

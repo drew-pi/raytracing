@@ -296,10 +296,10 @@ public:
   // general triangle logic
   //
 
-  [[nodiscard]] static std::optional<HitRecord<T>>
+  [[nodiscard]] static std::optional<TriangleIntersectionRecord<T>>
   intersect_triangle(const Ray<T> &ray, Interval<T> interval,
-                     const Material<T> &material, const point3<T> &v0,
-                     const point3<T> &v1, const point3<T> &v2) {
+                     const point3<T> &v0, const point3<T> &v1,
+                     const point3<T> &v2) {
 
     const vec3<T> direction = ray.direction();
     const auto origin = ray.origin();
@@ -338,9 +338,7 @@ public:
     if (!interval.surrounds(t))
       return std::nullopt;
 
-    const auto outward_normal = unit_vector(normal);
-
-    return HitRecord<T>(ray.at(t), t, material, ray, outward_normal);
+    return TriangleIntersectionRecord<T>(t, u, v);
   }
 
   [[nodiscard]] static BoundingBox<T>

@@ -23,6 +23,13 @@ template <std::floating_point T> struct BVHNode {
   std::uint8_t split_axis = 0;
 };
 
+template <std::floating_point T> struct BVHHit {
+  std::uint32_t triangle_id;
+  T t;
+  T u;
+  T v;
+};
+
 template <std::floating_point T> class BVH {
 
 private:
@@ -239,18 +246,17 @@ public:
     return nodes.front().box;
   }
 
-  [[nodiscard]] std::optional<HitRecord<T>>
+  [[nodiscard]] std::optional<BVHHit<T>>
   hit(const Ray<T> &r, Interval<T> interval,
       std::span<const point3<T>> positions,
-      std::span<const SceneTriangle> triangles,
-      std::span<const std::unique_ptr<Material<T>>> materials) const {
+      std::span<const SceneTriangle> triangles) const {
 
     // Each thread gets its own persistent stack, reused across calls.
     // clear() removes elements but preserves capacity to avoid reallocations.
     thread_local std::vector<size_t> stack;
     stack.clear();
 
-    std::optional<HitRecord<T>> closest_hit;
+    std::optional<BVHHit<T>> closest_hit;
     const auto axis_direction_inv = r.invert_direction();
 
     size_t index = 0;
@@ -297,13 +303,17 @@ public:
           const auto &vertices = triangle.vertices;
 
           auto candidate = Mesh<T>::intersect_triangle(
-              r, interval, *materials[triangle.material_id],
-              positions[vertices.v0], positions[vertices.v1],
+              r, interval, positions[vertices.v0], positions[vertices.v1],
               positions[vertices.v2]);
 
           if (candidate) {
             interval = Interval<T>{interval.min(), candidate->t};
-            closest_hit = candidate;
+            closest_hit = BVHHit<T>{
+                triangle_id,
+                candidate->t,
+                candidate->u,
+                candidate->v,
+            };
           }
         }
       }

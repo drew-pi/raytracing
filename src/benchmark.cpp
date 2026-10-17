@@ -1,4 +1,5 @@
 #include "new_benchmark_scene.h"
+#include "triangle_test.h"
 
 #include <scene.h>
 
@@ -34,7 +35,8 @@ int main(int argc, char *argv[]) {
   using Clock = std::chrono::steady_clock;
 
   const auto t0 = Clock::now();
-  auto [camera, meshes] = create_new_benchmark_scene();
+  // auto [camera, meshes] = create_new_benchmark_scene();
+  auto [camera, meshes] = create_triangle_test_scene();
   const auto t1 = Clock::now();
 
   Scene<double> scene;
