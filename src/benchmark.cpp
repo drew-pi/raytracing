@@ -1,8 +1,10 @@
-#include "benchmark_scene.h"
+#include "new_benchmark_scene.h"
+
 #include <scene.h>
 
 #include <charconv>
 #include <chrono>
+#include <iomanip>
 #include <iostream>
 #include <string_view>
 #include <system_error>
@@ -18,6 +20,7 @@ int main(int argc, char *argv[]) {
 
   if (argc == 2) {
     const std::string_view argument{argv[1]};
+
     const auto [end, error] = std::from_chars(
         argument.data(), argument.data() + argument.size(), thread_count);
 
@@ -31,24 +34,26 @@ int main(int argc, char *argv[]) {
   using Clock = std::chrono::steady_clock;
 
   const auto t0 = Clock::now();
-  auto [camera, world] = create_scene();
-
+  auto [camera, meshes] = create_new_benchmark_scene();
   const auto t1 = Clock::now();
-  Scene<double> scene(std::move(world));
 
+  Scene<double> scene;
+  scene.build(std::move(meshes));
   const auto t2 = Clock::now();
-  const auto checksum = camera.render_checksum(scene, thread_count, false);
-  // camera.render(bvh);
-  const auto t3 = Clock::now();
 
-  std::cerr << "checksum: " << checksum.x() << ' ' << checksum.y() << ' '
-            << checksum.z() << '\n';
+  const auto checksum = camera.render_checksum(scene, thread_count, false);
+  const auto t3 = Clock::now();
 
   const auto milliseconds = [](auto begin, auto end) {
     return std::chrono::duration<double, std::milli>(end - begin).count();
   };
 
+  std::cerr << std::setprecision(17) << "checksum: " << checksum.x() << ' '
+            << checksum.y() << ' ' << checksum.z() << '\n';
+
   std::cerr << "\nscene_ms,build_ms,render_ms\n"
             << milliseconds(t0, t1) << ',' << milliseconds(t1, t2) << ','
             << milliseconds(t2, t3) << '\n';
+
+  return 0;
 }

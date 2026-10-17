@@ -1,8 +1,7 @@
 #pragma once
 
 #include <bound_box.h>
-#include <hittable.h>
-#include <hittable_list.h>
+#include <mesh.h>
 
 #include <algorithm>
 #include <cassert>
@@ -11,7 +10,7 @@
 #include <limits>
 #include <memory>
 #include <optional>
-#include <utility>
+#include <span>
 #include <vector>
 
 template <std::floating_point T> struct BVHNode {
@@ -28,33 +27,45 @@ template <std::floating_point T> class BVH {
 
 private:
   std::vector<BVHNode<T>> nodes;
-  std::vector<std::unique_ptr<Hittable<T>>> primitives;
+  std::vector<std::uint32_t> indexes;
 
-  void build(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
+  void build(const std::vector<point3<T>> &positions,
+             const std::vector<SceneTriangle> &triangles,
+             std::vector<std::uint32_t> &triangle_ids, size_t start,
              size_t end) {
 
     assert(start < end);
-    assert(end <= objects.size());
+    assert(end <= triangle_ids.size());
 
-    size_t span = end - start;
+    const size_t triangle_count = end - start;
 
-    // base case
-    if (span == 1) {
-      size_t primitive_index = primitives.size();
-      nodes.push_back(
-          BVHNode{objects[start]->bounding_box(), primitive_index, 1, 0});
-      primitives.push_back(std::move(objects[start]));
-      return;
-    }
-    // second base case
-    if (span == 2) {
-      size_t primitive_left_index = primitives.size();
-      nodes.push_back(
-          BVHNode<T>{BoundingBox<T>(objects[start]->bounding_box(),
-                                    objects[start + 1]->bounding_box()),
-                     primitive_left_index, 2, 0});
-      primitives.push_back(std::move(objects[start]));
-      primitives.push_back(std::move(objects[start + 1]));
+    if (triangle_count <= 2) {
+      // leaf node so offset identifies the first in entry in the indexes array
+      const size_t first_primitive = indexes.size();
+
+      const auto &first_triangle = triangles[triangle_ids[start]].vertices;
+
+      auto leaf_bounds = Mesh<T>::bounding_box(first_triangle, positions);
+
+      if (triangle_count == 2) {
+        const auto &second_triangle =
+            triangles[triangle_ids[start + 1]].vertices;
+
+        leaf_bounds = BoundingBox<T>(
+            leaf_bounds, Mesh<T>::bounding_box(second_triangle, positions));
+      }
+
+      nodes.push_back(BVHNode<T>{
+          leaf_bounds,
+          first_primitive,
+          static_cast<std::uint32_t>(triangle_count),
+          0,
+      });
+
+      for (size_t i = start; i < end; ++i) {
+        indexes.push_back(triangle_ids[i]);
+      }
+
       return;
     }
 
@@ -68,9 +79,10 @@ private:
     // Cache boxes and centroids contiguously to avoid repeated primitive
     // pointer dereferences during sorting and SAH evaluation.
     std::vector<BuildEntry> entries;
-    entries.reserve(span);
+    entries.reserve(triangle_count);
 
-    const BoundingBox<T> box = objects[start]->bounding_box();
+    const auto &first_triangle = triangles[triangle_ids[start]].vertices;
+    const BoundingBox<T> box = Mesh<T>::bounding_box(first_triangle, positions);
     entries.push_back(BuildEntry{
         box,
         box.centroid(),
@@ -80,13 +92,19 @@ private:
     // get parent surface area
     BoundingBox<T> parent_bounding_box = entries.front().box;
 
+    // loop combines two things
+    // - calculates parent surface area
+    // caches boxes and centroids contiguously
     for (size_t i = start + 1; i < end; ++i) {
-      const BoundingBox<T> box = objects[i]->bounding_box();
-      parent_bounding_box = BoundingBox<T>(parent_bounding_box, box);
+      auto &current_triangle = triangles[triangle_ids[i]].vertices;
+      const BoundingBox<T> current_box =
+          Mesh<T>::bounding_box(current_triangle, positions);
+
+      parent_bounding_box = BoundingBox<T>(parent_bounding_box, current_box);
 
       entries.push_back(BuildEntry{
-          box,
-          box.centroid(),
+          current_box,
+          current_box.centroid(),
           i,
       });
     }
@@ -113,15 +131,16 @@ private:
       };
     };
 
-    std::vector<BoundingBox<T>> right_boxes(span, BoundingBox<T>::empty());
+    std::vector<BoundingBox<T>> right_boxes(triangle_count,
+                                            BoundingBox<T>::empty());
 
     for (int axis = 0; axis < 3; ++axis) {
       std::sort(entries.begin(), entries.end(), comparator_for_axis(axis));
 
       // Build suffix bounds: right_boxes[k] encloses entries [k, span).
-      right_boxes[span - 1] = entries[span - 1].box;
+      right_boxes[triangle_count - 1] = entries[triangle_count - 1].box;
 
-      for (size_t k = span - 1; k > 0; --k) {
+      for (size_t k = triangle_count - 1; k > 0; --k) {
         right_boxes[k - 1] = BoundingBox<T>(entries[k - 1].box, right_boxes[k]);
       }
 
@@ -129,12 +148,12 @@ private:
       // advances.
       BoundingBox<T> left_box = entries[0].box;
 
-      for (size_t k = 1; k < span; ++k) {
+      for (size_t k = 1; k < triangle_count; ++k) {
         const BoundingBox<T> &right_box = right_boxes[k];
 
-        const T sah =
-            (left_box.surface_area() / parent_surface_area) * T(k) +
-            (right_box.surface_area() / parent_surface_area) * T(span - k);
+        const T sah = (left_box.surface_area() / parent_surface_area) * T(k) +
+                      (right_box.surface_area() / parent_surface_area) *
+                          T(triangle_count - k);
 
         if (sah < lowest_sah) {
           lowest_sah = sah;
@@ -153,35 +172,36 @@ private:
     const T C_isect = T{0.5}; // relative cost of a primitive intersection
     const T C_trav = T{1};    // relative cost of traversing an internal node
 
-    const T leaf_cost = T(span) * C_isect;
+    const T leaf_cost = T(triangle_count) * C_isect;
     const T split_cost = C_trav + C_isect * lowest_sah;
 
     if (leaf_cost <= split_cost) {
-      size_t primitive_index = primitives.size();
+      size_t primitive_index = indexes.size();
 
       for (size_t i = start; i < end; ++i) {
-        primitives.push_back(std::move(objects[i]));
+        indexes.push_back(triangle_ids[i]);
       }
 
-      assert(span < std::numeric_limits<std::uint32_t>::max());
+      assert(triangle_count < std::numeric_limits<std::uint32_t>::max());
       nodes.push_back(BVHNode<T>{parent_bounding_box, primitive_index,
-                                 static_cast<std::uint32_t>(span), 0});
+                                 static_cast<std::uint32_t>(triangle_count),
+                                 0});
 
       return;
     }
 
-    std::sort(entries.begin(), entries.end(), comparator_for_axis(best_axis));
+    // if best axis is the last axis (z) then no need to run sorting again
+    if (best_axis != 2)
+      std::sort(entries.begin(), entries.end(), comparator_for_axis(best_axis));
 
-    std::vector<std::unique_ptr<Hittable<T>>> reordered;
-    reordered.reserve(span);
+    std::vector<std::uint32_t> reordered;
+    reordered.reserve(triangle_count);
 
     for (const BuildEntry &entry : entries) {
-      reordered.push_back(std::move(objects[entry.original_index]));
+      reordered.push_back(triangle_ids[entry.original_index]);
     }
 
-    for (size_t k = 0; k < span; ++k) {
-      objects[start + k] = std::move(reordered[k]);
-    }
+    std::copy(reordered.begin(), reordered.end(), triangle_ids.begin() + start);
 
     // Append the parent before any of the subtrees.
     const size_t current_entry_index = nodes.size();
@@ -189,35 +209,41 @@ private:
                                static_cast<std::uint8_t>(best_axis)});
 
     // The left child's root is now at current_entry_index + 1.
-    build(objects, start, best_split_point);
+    build(positions, triangles, triangle_ids, start, best_split_point);
 
     // The right child's root will be at the next available position.
     const size_t right_index = nodes.size();
-    build(objects, best_split_point, end);
+    build(positions, triangles, triangle_ids, best_split_point, end);
 
     // Use the index: recursive appends may have invalidated references.
     nodes[current_entry_index].offset = right_index;
   }
 
 public:
-  BVH(HittableList<T> objects)
-      : BVH(objects.objects, 0, objects.objects.size()) {}
+  BVH() = default;
 
-  BVH(std::vector<std::unique_ptr<Hittable<T>>> &objects, size_t start,
-      size_t end) {
+  BVH(const std::vector<point3<T>> &positions,
+      const std::vector<SceneTriangle> &triangles) {
 
-    assert(start < end);
-    assert(end <= objects.size());
-    primitives.reserve(end - start);
-    build(objects, start, end);
+    assert(!triangles.empty());
+    assert(triangles.size() < std::numeric_limits<std::uint32_t>::max());
+
+    std::vector<std::uint32_t> triangle_ids(triangles.size());
+    std::iota(triangle_ids.begin(), triangle_ids.end(), std::uint32_t{0});
+
+    indexes.reserve(triangles.size());
+    build(positions, triangles, triangle_ids, 0, triangle_ids.size());
   }
 
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {
     return nodes.front().box;
   }
 
-  [[nodiscard]] std::optional<HitRecord<T>> hit(const Ray<T> &r,
-                                                Interval<T> interval) const {
+  [[nodiscard]] std::optional<HitRecord<T>>
+  hit(const Ray<T> &r, Interval<T> interval,
+      std::span<const point3<T>> positions,
+      std::span<const SceneTriangle> triangles,
+      std::span<const std::unique_ptr<Material<T>>> materials) const {
 
     // Each thread gets its own persistent stack, reused across calls.
     // clear() removes elements but preserves capacity to avoid reallocations.
@@ -266,8 +292,16 @@ public:
         // leaf
         for (size_t i = 0; i < node.primitive_count; ++i) {
           const size_t primitive_index = node.offset + i;
+          const auto triangle_id = indexes[primitive_index];
+          const auto &triangle = triangles[triangle_id];
+          const auto &vertices = triangle.vertices;
 
-          if (auto candidate = primitives[primitive_index]->hit(r, interval)) {
+          auto candidate = Mesh<T>::intersect_triangle(
+              r, interval, *materials[triangle.material_id],
+              positions[vertices.v0], positions[vertices.v1],
+              positions[vertices.v2]);
+
+          if (candidate) {
             interval = Interval<T>{interval.min(), candidate->t};
             closest_hit = candidate;
           }

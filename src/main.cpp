@@ -1,5 +1,5 @@
 
-#include "benchmark_scene.h"
+
 #include "triangle_test.h"
 
 #include <scene.h>
@@ -88,7 +88,8 @@ int main() {
   const int thread_count = 16;
   // camera.render_multi_thread(bvh, thread_count);
 
-  auto [camera, world] = create_triangle_test_scene();
-  Scene<double> scene(std::move(world));
+  auto [camera, meshes] = create_triangle_test_scene();
+  Scene<double> scene;
+  scene.build(std::move(meshes));
   camera.render_multi_thread(scene, thread_count);
 }

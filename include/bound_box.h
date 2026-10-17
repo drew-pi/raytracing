@@ -10,6 +10,19 @@ template <std::floating_point T> class BoundingBox {
 private:
   Interval<T> x, y, z;
 
+  // done for flat triangles so they get some depth
+  constexpr void pad(T delta) noexcept {
+    const auto pad = [delta](Interval<T> &i) {
+      if (i.maximum - i.minimum < delta) {
+        i.minimum -= delta / 2;
+        i.maximum += delta / 2;
+      }
+    };
+    pad(x);
+    pad(y);
+    pad(z);
+  }
+
 public:
   constexpr BoundingBox<T>() noexcept {}
 
@@ -26,6 +39,17 @@ public:
                            : Interval(p2.y(), p1.y());
     z = (p1.z() <= p2.z()) ? Interval(p1.z(), p2.z())
                            : Interval(p2.z(), p1.z());
+  }
+
+  constexpr BoundingBox(const point3<T> &p1, const point3<T> &p2,
+                        const point3<T> &p3) noexcept
+      : x(std::min({p1.x(), p2.x(), p3.x()}),
+          std::max({p1.x(), p2.x(), p3.x()})),
+        y(std::min({p1.y(), p2.y(), p3.y()}),
+          std::max({p1.y(), p2.y(), p3.y()})),
+        z(std::min({p1.z(), p2.z(), p3.z()}),
+          std::max({p1.z(), p2.z(), p3.z()})) {
+    pad(T(1e-4));
   }
 
   constexpr BoundingBox<T>(const BoundingBox<T> box1,
