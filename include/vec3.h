@@ -184,3 +184,5 @@ public:
     return v / len;
   }
 };
+
+template <std::floating_point T> using point3 = vec3<T>;

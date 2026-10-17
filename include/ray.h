@@ -3,8 +3,6 @@
 #include <concepts>
 #include <vec3.h>
 
-template <std::floating_point T> using point3 = vec3<T>;
-
 template <std::floating_point T> class Ray {
 
 private:

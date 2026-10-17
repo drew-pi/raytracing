@@ -4,7 +4,7 @@
 #include <optional>
 
 #include <color.h>
-#include <hittable.h>
+#include <interactions.h>
 #include <ray.h>
 
 template <std::floating_point T> struct ScatterRecord {
@@ -17,7 +17,7 @@ public:
   virtual ~Material() = default;
 
   virtual std::optional<ScatterRecord<T>>
-  scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const = 0;
+  scatter(const Ray<T> &ray_in, const SurfaceInteraction<T> &hit) const = 0;
 };
 
 template <std::floating_point T> class Lambertian : public Material<T> {
@@ -28,7 +28,8 @@ public:
   constexpr Lambertian(const Color<T> &albedo) noexcept : albedo(albedo) {}
 
   std::optional<ScatterRecord<T>>
-  scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const override {
+  scatter(const Ray<T> &ray_in,
+          const SurfaceInteraction<T> &hit) const override {
     auto scatter_dir = hit.shading_normal + vec3<T>::random_unit_vector();
 
     // catch degenerate scatter direction if the random unit vector is almost
@@ -53,7 +54,8 @@ public:
   constexpr Metal(const Color<T> &albedo) noexcept : albedo(albedo) {}
 
   std::optional<ScatterRecord<T>>
-  scatter(const Ray<T> &ray_in, const HitRecord<T> &hit) const override {
+  scatter(const Ray<T> &ray_in,
+          const SurfaceInteraction<T> &hit) const override {
     vec3<T> reflection =
         vec3<T>::reflect(ray_in.direction(), hit.shading_normal);
 

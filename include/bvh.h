@@ -1,14 +1,16 @@
 #pragma once
 
 #include <bound_box.h>
+#include <interactions.h>
 #include <mesh.h>
+#include <triangle.h>
 
 #include <algorithm>
 #include <cassert>
 #include <cmath>
 #include <concepts>
 #include <limits>
-#include <memory>
+#include <numeric>
 #include <optional>
 #include <span>
 #include <vector>
@@ -21,13 +23,6 @@ template <std::floating_point T> struct BVHNode {
   size_t offset = 0;
   std::uint32_t primitive_count = 0;
   std::uint8_t split_axis = 0;
-};
-
-template <std::floating_point T> struct BVHHit {
-  std::uint32_t triangle_id;
-  T t;
-  T u;
-  T v;
 };
 
 template <std::floating_point T> class BVH {
@@ -52,14 +47,14 @@ private:
 
       const auto &first_triangle = triangles[triangle_ids[start]].vertices;
 
-      auto leaf_bounds = Mesh<T>::bounding_box(first_triangle, positions);
+      auto leaf_bounds = triangle_bounding_box<T>(first_triangle, positions);
 
       if (triangle_count == 2) {
         const auto &second_triangle =
             triangles[triangle_ids[start + 1]].vertices;
 
         leaf_bounds = BoundingBox<T>(
-            leaf_bounds, Mesh<T>::bounding_box(second_triangle, positions));
+            leaf_bounds, triangle_bounding_box<T>(second_triangle, positions));
       }
 
       nodes.push_back(BVHNode<T>{
@@ -89,7 +84,8 @@ private:
     entries.reserve(triangle_count);
 
     const auto &first_triangle = triangles[triangle_ids[start]].vertices;
-    const BoundingBox<T> box = Mesh<T>::bounding_box(first_triangle, positions);
+    const BoundingBox<T> box =
+        triangle_bounding_box<T>(first_triangle, positions);
     entries.push_back(BuildEntry{
         box,
         box.centroid(),
@@ -105,7 +101,7 @@ private:
     for (size_t i = start + 1; i < end; ++i) {
       auto &current_triangle = triangles[triangle_ids[i]].vertices;
       const BoundingBox<T> current_box =
-          Mesh<T>::bounding_box(current_triangle, positions);
+          triangle_bounding_box<T>(current_triangle, positions);
 
       parent_bounding_box = BoundingBox<T>(parent_bounding_box, current_box);
 
@@ -243,6 +239,7 @@ public:
   }
 
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {
+    assert(!nodes.empty());
     return nodes.front().box;
   }
 
@@ -250,6 +247,8 @@ public:
   hit(const Ray<T> &r, Interval<T> interval,
       std::span<const point3<T>> positions,
       std::span<const SceneTriangle> triangles) const {
+
+    assert(!nodes.empty());
 
     // Each thread gets its own persistent stack, reused across calls.
     // clear() removes elements but preserves capacity to avoid reallocations.
@@ -302,7 +301,7 @@ public:
           const auto &triangle = triangles[triangle_id];
           const auto &vertices = triangle.vertices;
 
-          auto candidate = Mesh<T>::intersect_triangle(
+          auto candidate = intersect_triangle<T>(
               r, interval, positions[vertices.v0], positions[vertices.v1],
               positions[vertices.v2]);
 

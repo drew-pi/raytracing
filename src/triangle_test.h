@@ -11,6 +11,9 @@
 #include <color.h>
 #include <material.h>
 #include <mesh.h>
+#include <mesh_generators/quad.h>
+#include <mesh_generators/box.h>
+#include <mesh_generators/sphere.h>
 #include <vec3.h>
 
 [[nodiscard]] inline std::tuple<Camera<double>, std::vector<Mesh<double>>>
@@ -29,7 +32,7 @@ create_triangle_test_scene() {
   };
   auto quad = [&](const Point &origin, const Vector &u, const Vector &v,
                   const Colour &color) {
-    meshes.push_back(Mesh<double>::make_quad(origin, u, v, diffuse(color)));
+    meshes.push_back(make_quad<double>(origin, u, v, diffuse(color)));
   };
 
   // Interior: x in [-3, 3], y in [0, 6], z in [-6, 0].
@@ -47,7 +50,7 @@ create_triangle_test_scene() {
     const Vector v(0, height, 0);
     const Vector w(depth * sine, 0, depth * cosine);
     const Point origin = Point(center_x, 0, center_z) - 0.5 * (u + w);
-    meshes.push_back(Mesh<double>::make_box(origin, u, v, w, diffuse(white)));
+    meshes.push_back(make_box<double>(origin, u, v, w, diffuse(white)));
   };
   cuboid(-1.2, -2.0, 1.5, 1.8, 1.6, -18.0);
   cuboid(1.1, -4.0, 1.6, 3.0, 1.7, 20.0);
@@ -56,16 +59,16 @@ create_triangle_test_scene() {
   // The unsubdivided seed's lowest vertex is at -0.8506508 * radius;
   // levels 1+ have a vertex at -radius, so each mesh rests on its support.
   meshes.push_back(
-      Mesh<double>::make_sphere(Point(-2.5, 0.2 * 0.8506508083520399, -0.45),
+      make_sphere<double>(Point(-2.5, 0.2 * 0.8506508083520399, -0.45),
                                 0.2, 0, diffuse(Colour(0.85, 0.45, 0.08))));
-  meshes.push_back(Mesh<double>::make_sphere(
+  meshes.push_back(make_sphere<double>(
       Point(-0.2, 0.3, -0.55), 0.3, 3,
       std::make_unique<Metal<double>>(Colour(0.85, 0.65, 0.25))));
-  meshes.push_back(Mesh<double>::make_sphere(Point(1.25, 0.45, -1.0), 0.45, 2,
+  meshes.push_back(make_sphere<double>(Point(1.25, 0.45, -1.0), 0.45, 2,
                                              diffuse(Colour(0.12, 0.3, 0.75))));
-  meshes.push_back(Mesh<double>::make_sphere(Point(-2.05, 0.65, -4.65), 0.65, 3,
+  meshes.push_back(make_sphere<double>(Point(-2.05, 0.65, -4.65), 0.65, 3,
                                              diffuse(Colour(0.45, 0.18, 0.6))));
-  meshes.push_back(Mesh<double>::make_sphere(
+  meshes.push_back(make_sphere<double>(
       Point(-1.2, 1.8 + 0.55, -2.0), 0.55, 6,
       std::make_unique<Metal<double>>(Colour(0.88, 0.9, 0.95))));
 

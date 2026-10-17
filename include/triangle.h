@@ -2,103 +2,97 @@
 
 #include <cmath>
 #include <concepts>
-#include <memory>
 #include <optional>
-#include <utility>
+#include <span>
 
-#include <hittable.h>
-#include <material.h>
+#include <bound_box.h>
+#include <interactions.h>
+#include <interval.h>
+#include <mesh.h>
+#include <ray.h>
+#include <vec3.h>
 
-template <std::floating_point T> struct TriangleIntersection {
-  // barycentric coordinates
-  T u;
-  T v;
-  T t;
-};
+template <std::floating_point T>
+[[nodiscard]] std::optional<TriangleIntersectionRecord<T>>
+intersect_triangle(const Ray<T> &ray, Interval<T> interval, const point3<T> &v0,
+                   const point3<T> &v1, const point3<T> &v2) {
 
-template <std::floating_point T> class Triangle : public Hittable<T> {
+  const vec3<T> direction = ray.direction();
+  const auto origin = ray.origin();
 
-public:
-  Triangle(const point3<T> &v0, const point3<T> &v1, const point3<T> &v2,
-           std::unique_ptr<Material<T>> surface_material) noexcept
-      : v0(v0), v1(v1), v2(v2), material(std::move(surface_material)) {
-    assert(material != nullptr);
+  const auto e1 = v1 - v0;
+  const auto e2 = v2 - v0;
+  const auto normal = cross(e1, e2);
+  const auto s = origin - v0;
 
-    e1 = v1 - v0;
-    e2 = v2 - v0;
-    normal = cross(e1, e2);
-    _bounding_box =
-        BoundingBox<T>(BoundingBox<T>(v0, v1), BoundingBox<T>(v2, v2));
-  }
+  const auto w = cross(direction, s);
 
-  [[nodiscard]] BoundingBox<T> bounding_box() const override {
-    return _bounding_box;
-  }
+  const auto determinant = dot(-direction, normal);
 
-  [[nodiscard]] std::optional<HitRecord<T>>
-  hit(const Ray<T> &ray, Interval<T> interval) const override {
+  constexpr T epsilon = T{1e-8};
+  if (std::abs(determinant) <= epsilon)
+    return std::nullopt;
 
-    if (auto intersection = intersect_triangle(ray)) {
-      // make sure the intersection point lies inside the triangle (including
-      // its edges) uses barycentric coords (both coords have to be larger than
-      // 0 and sum to less than 1)
-      if (!(intersection->u >= T{0} && intersection->v >= T{0} &&
-            intersection->u + intersection->v <= T{1})) {
-        return std::nullopt;
-      }
+  const auto t_num = dot(s, normal);
+  const auto u_num = dot(-e2, w);
+  const auto v_num = dot(e1, w);
 
-      // Reject hits outside the permitted ray range.
-      if (!interval.surrounds(intersection->t))
-        return std::nullopt;
+  const auto inverse_det = T{1} / determinant;
 
-      const auto outward_normal = unit_vector(normal);
+  const auto u = u_num * inverse_det;
+  const auto v = v_num * inverse_det;
+  const auto t = t_num * inverse_det;
 
-      return HitRecord<T>(ray.at(intersection->t), intersection->t, *material,
-                          ray, outward_normal);
-    }
-
+  // make sure the intersection point lies inside the triangle (including
+  // its edges) uses barycentric coords (both coords have to be larger than
+  // 0 and sum to less than 1)
+  if (!(u >= T{0} && v >= T{0} && u + v <= T{1})) {
     return std::nullopt;
   }
 
-private:
-  point3<T> v0;
-  point3<T> v1;
-  point3<T> v2;
-  std::unique_ptr<Material<T>> material;
-  BoundingBox<T> _bounding_box;
+  // Reject hits outside the permitted ray range.
+  if (!interval.surrounds(t))
+    return std::nullopt;
 
-  vec3<T> e1;
-  vec3<T> e2;
-  vec3<T> normal;
+  return TriangleIntersectionRecord<T>(t, u, v);
+}
 
-  [[nodiscard]] std::optional<TriangleIntersection<T>>
-  intersect_triangle(const Ray<T> &r) const {
+template <std::floating_point T>
+[[nodiscard]] BoundingBox<T> triangle_bounding_box(const point3<T> &v0,
+                                                   const point3<T> &v1,
+                                                   const point3<T> &v2) {
+  return BoundingBox<T>(v0, v1, v2);
+}
 
-    const vec3<T> direction = r.direction();
-    const auto origin = r.origin();
+template <std::floating_point T>
+[[nodiscard]] BoundingBox<T>
+triangle_bounding_box(TriangleIndices triangle,
+                      std::span<const point3<T>> positions) {
+  const auto &v0 = positions[triangle.v0];
+  const auto &v1 = positions[triangle.v1];
+  const auto &v2 = positions[triangle.v2];
 
-    const auto S = origin - v0;
+  return BoundingBox<T>(v0, v1, v2);
+}
 
-    const auto w = cross(direction, S);
+template <std::floating_point T>
+[[nodiscard]] constexpr point3<T>
+triangle_centroid(const point3<T> &p1, const point3<T> &p2,
+                  const point3<T> &p3) noexcept {
+  constexpr T one_third = T{1} / T{3}; // computed at compile time
+  return point3<T>((p1.x() + p2.x() + p3.x()) * one_third,
+                   (p1.y() + p2.y() + p3.y()) * one_third,
+                   (p1.z() + p2.z() + p3.z()) * one_third);
+}
 
-    const auto determinant = dot(-direction, normal);
+template <std::floating_point T>
+[[nodiscard]] point3<T>
+triangle_centroid(TriangleIndices triangle,
+                  std::span<const point3<T>> positions) noexcept {
+  constexpr T one_third = T{1} / T{3}; // computed at compile time
+  const auto &v0 = positions[triangle.v0];
+  const auto &v1 = positions[triangle.v1];
+  const auto &v2 = positions[triangle.v2];
 
-    constexpr T epsilon = T{1e-8};
-    if (std::abs(determinant) <= epsilon)
-      return std::nullopt;
-
-    const auto t_num = dot(S, normal);
-    const auto u_num = dot(-e2, w);
-    const auto v_num = dot(e1, w);
-
-    const auto inverse_det = T{1} / determinant;
-
-    const auto intersection = TriangleIntersection<T>{
-        u_num * inverse_det,
-        v_num * inverse_det,
-        t_num * inverse_det,
-    };
-
-    return intersection;
-  }
-};
+  return (v0 + v1 + v2) * one_third;
+}

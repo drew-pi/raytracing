@@ -10,7 +10,6 @@
 #include <vector>
 
 #include <color.h>
-#include <hittable.h>
 #include <interval.h>
 #include <scene.h>
 #include <utility.h>

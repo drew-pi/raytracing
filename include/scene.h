@@ -1,13 +1,16 @@
 #pragma once
 
+#include <algorithm>
+#include <cassert>
 #include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <utility>
 #include <vector>
 
 #include <bvh.h>
-#include <hittable_list.h>
+#include <material.h>
 #include <mesh.h>
 
 template <std::floating_point T> class Scene {
@@ -15,6 +18,49 @@ public:
   Scene() = default;
 
   void build(std::vector<Mesh<T>> meshes) {
+
+    // checking preconditions
+    //
+    constexpr std::size_t index_limit =
+        std::numeric_limits<std::uint32_t>::max() - std::size_t{1};
+
+    const auto vertex_limit = std::min({
+        index_limit,
+        positions.max_size(),
+        normals.max_size(),
+    });
+
+    const auto triangle_limit = std::min(index_limit, triangles.max_size());
+
+    const auto material_limit = std::min(index_limit, materials.max_size());
+
+    std::size_t total_vertices = positions.size();
+    std::size_t total_triangles = triangles.size();
+
+    assert(total_vertices <= vertex_limit);
+    assert(total_triangles <= triangle_limit);
+
+    assert(materials.size() <= material_limit);
+    assert(meshes.size() <= material_limit - materials.size());
+
+    const std::size_t total_materials = materials.size() + meshes.size();
+
+    for (const auto &mesh : meshes) {
+      assert(mesh.vertex_count() <= vertex_limit - total_vertices);
+      total_vertices += mesh.vertex_count();
+
+      assert(mesh.triangle_count() <= triangle_limit - total_triangles);
+      total_triangles += mesh.triangle_count();
+    }
+    //
+    // end checking preconditions
+
+    // Each array needs at most one capacity increase for this batch.
+    positions.reserve(total_vertices);
+    normals.reserve(total_vertices);
+    triangles.reserve(total_triangles);
+    materials.reserve(total_materials);
+
     for (auto &mesh : meshes) {
       add_mesh(std::move(mesh));
     }
@@ -22,8 +68,8 @@ public:
     build_bvh();
   }
 
-  [[nodiscard]] std::optional<HitRecord<T>> hit(const Ray<T> &ray,
-                                                Interval<T> interval) const {
+  [[nodiscard]] std::optional<SurfaceInteraction<T>>
+  hit(const Ray<T> &ray, Interval<T> interval) const {
 
     const std::optional<BVHHit<T>> candidate =
         _bvh.hit(ray, interval, positions, triangles);
@@ -73,7 +119,7 @@ public:
       }
     }
 
-    return HitRecord<T>{
+    return SurfaceInteraction<T>{
         .p = ray.at(t),
         .t = t,
         .geometric_normal = front_face ? geometric_outward : -geometric_outward,
@@ -108,11 +154,12 @@ private:
 
     const auto material_id = static_cast<std::uint32_t>(materials.size());
 
-    // Allocate before changing the logical contents.
-    positions.reserve(positions.size() + mesh.vertex_count());
-    normals.reserve(normals.size() + mesh.vertex_count());
-    triangles.reserve(triangles.size() + mesh.triangle_count());
-    materials.reserve(materials.size() + 1);
+    // no preallocation because this is handled in the public method
+    //
+    // positions.reserve(positions.size() + mesh.vertex_count());
+    // normals.reserve(normals.size() + mesh.vertex_count());
+    // triangles.reserve(triangles.size() + mesh.triangle_count());
+    // materials.reserve(materials.size() + 1);
 
     mesh.append_positions(positions);
     mesh.append_normals(normals);

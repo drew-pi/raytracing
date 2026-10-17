@@ -11,6 +11,8 @@
 #include <color.h>
 #include <material.h>
 #include <mesh.h>
+#include <mesh_generators/quad.h>
+#include <mesh_generators/sphere.h>
 #include <vec3.h>
 
 using BenchmarkSetup = std::tuple<Camera<double>, std::vector<Mesh<double>>>;
@@ -22,18 +24,18 @@ using BenchmarkSetup = std::tuple<Camera<double>, std::vector<Mesh<double>>>;
   auto diffuse = [&](point3<double> center, double radius, Color<double> color,
                      int subdivisions = 2) {
     meshes.push_back(
-        Mesh<double>::make_sphere(center, radius, subdivisions,
+        make_sphere<double>(center, radius, subdivisions,
                                   std::make_unique<Lambertian<double>>(color)));
   };
 
   auto metal = [&](point3<double> center, double radius, Color<double> color,
                    int subdivisions = 2) {
-    meshes.push_back(Mesh<double>::make_sphere(
+    meshes.push_back(make_sphere<double>(
         center, radius, subdivisions, std::make_unique<Metal<double>>(color)));
   };
 
   // Flat ground with its normal facing upward.
-  meshes.push_back(Mesh<double>::make_quad(
+  meshes.push_back(make_quad<double>(
       point3<double>(-100, 0, 100), vec3<double>(200, 0, 0),
       vec3<double>(0, 0, -200),
       std::make_unique<Lambertian<double>>(Color<double>(0.12, 0.16, 0.23))));
