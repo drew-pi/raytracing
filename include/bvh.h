@@ -41,6 +41,10 @@ private:
 
     const size_t triangle_count = end - start;
 
+    //
+    // base case
+    //
+
     if (triangle_count <= 2) {
       // leaf node so offset identifies the first in entry in the indexes array
       const size_t first_primitive = indexes.size();
@@ -71,7 +75,10 @@ private:
       return;
     }
 
-    // not a leaf case
+    //
+    // not a leaf case (internal node)
+    //
+
     struct BuildEntry {
       BoundingBox<T> box;
       point3<T> centroid;
@@ -97,7 +104,7 @@ private:
 
     // loop combines two things
     // - calculates parent surface area
-    // caches boxes and centroids contiguously
+    // - caches boxes and centroids contiguously
     for (size_t i = start + 1; i < end; ++i) {
       auto &current_triangle = triangles[triangle_ids[i]].vertices;
       const BoundingBox<T> current_box =
@@ -140,7 +147,8 @@ private:
     for (int axis = 0; axis < 3; ++axis) {
       std::sort(entries.begin(), entries.end(), comparator_for_axis(axis));
 
-      // Build suffix bounds: right_boxes[k] encloses entries [k, span).
+      // Build suffix bounds: right_boxes[k] encloses entries [k,
+      // triangle_count).
       right_boxes[triangle_count - 1] = entries[triangle_count - 1].box;
 
       for (size_t k = triangle_count - 1; k > 0; --k) {
@@ -151,6 +159,7 @@ private:
       // advances.
       BoundingBox<T> left_box = entries[0].box;
 
+      // calculate the sah split cost for each possible split
       for (size_t k = 1; k < triangle_count; ++k) {
         const BoundingBox<T> &right_box = right_boxes[k];
 
@@ -172,7 +181,7 @@ private:
     assert(best_split_point > start && best_split_point < end);
 
     // leaf creation criterion
-    const T C_isect = T{0.5}; // relative cost of a primitive intersection
+    const T C_isect = T{0.5}; // relative cost of a triangle intersection
     const T C_trav = T{1};    // relative cost of traversing an internal node
 
     const T leaf_cost = T(triangle_count) * C_isect;
