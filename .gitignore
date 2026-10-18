@@ -384,3 +384,5 @@ tmbootpicker.efi
 *.txt
 benchmark-results/
 benchmark-results/*
+assets/
+assets/*
