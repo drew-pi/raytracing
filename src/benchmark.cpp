@@ -1,6 +1,4 @@
-#include "new_benchmark_scene.h"
-#include "real_scene.h"
-#include "triangle_test.h"
+#include "scenes/benchmark_scene.h"
 
 #include <scene.h>
 
@@ -13,7 +11,12 @@
 #include <utility>
 
 int main(int argc, char *argv[]) {
-  int thread_count = 1;
+  if (argc == 2 && std::string_view(argv[1]) == "--metadata") {
+    write_benchmark_metadata(std::cout);
+    return 0;
+  }
+
+  int thread_count = benchmark_thread_count;
 
   if (argc > 2) {
     std::cerr << "Usage: " << argv[0] << " [thread_count]\n";
@@ -36,9 +39,7 @@ int main(int argc, char *argv[]) {
   using Clock = std::chrono::steady_clock;
 
   const auto t0 = Clock::now();
-  // auto [camera, meshes] = create_new_benchmark_scene();
-  // auto [camera, meshes] = create_triangle_test_scene();
-  auto [camera, meshes] = create_real_scene();
+  auto [camera, meshes] = create_benchmark_scene();
   const auto t1 = Clock::now();
 
   Scene<double> scene;

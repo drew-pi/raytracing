@@ -13,8 +13,8 @@
 #include <color.h>
 #include <material.h>
 #include <mesh.h>
+#include <mesh_generators/box.h>
 #include <mesh_generators/ply.h>
-#include <mesh_generators/quad.h>
 #include <vec3.h>
 
 // project_root is the directory containing assets/, not the assets/ directory.
@@ -27,13 +27,20 @@ create_real_scene(const std::filesystem::path &project_root = ".") {
   // the public constructor after centering and applying a uniform positive
   // scale.
   const auto place_mesh = [](Mesh<double> mesh, const Point &center,
-                             double longest_extent,
-                             bool stand_on_floor = false) {
+                             double longest_extent, bool stand_on_floor = false,
+                             bool face_forward = false) {
     std::vector<Point> positions;
     positions.reserve(mesh.vertex_count());
     mesh.append_positions(positions);
     if (positions.empty()) {
       throw std::runtime_error("Real scene: cannot place an empty mesh");
+    }
+
+    // The dragon faces source +X; rotate -90 degrees about Y to face camera +Z.
+    if (face_forward) {
+      for (auto &position : positions) {
+        position = Point(-position[2], position[1], position[0]);
+      }
     }
 
     Point minimum = positions.front();
@@ -96,13 +103,13 @@ create_real_scene(const std::filesystem::path &project_root = ".") {
       place_mesh(load_ply<double>(project_root / "assets/xyzrgb_dragon.ply",
                                   std::make_unique<Lambertian<double>>(
                                       Colour(0.24, 0.55, 0.38))),
-                 Point(0.0, 0.0, 0.0), 6.0, true));
+                 Point(0.0, 0.0, 0.0), 6.0, true, true));
 
-  // Counterclockwise winding gives the mirror an upward-facing normal.
-  meshes.push_back(make_quad<double>(
-      Point(-100.0, 0.0, 100.0), vec3<double>(200.0, 0.0, 0.0),
-      vec3<double>(0.0, 0.0, -200.0),
-      std::make_unique<Metal<double>>(Colour(0.90, 0.90, 0.90))));
+  // A closed slab supplies both entry and exit boundaries for glass refraction.
+  // Its upper face is y = 0, exactly where the dragon's lowest vertex rests.
+  meshes.push_back(make_aligned_box<double>(
+      Point(-12.0, -0.25, -12.0), Point(12.0, 0.0, 12.0),
+      std::make_unique<Dielectric<double>>(1.5)));
 
   Camera<double> camera;
   camera.aspect_ratio = 4.0 / 3.0;

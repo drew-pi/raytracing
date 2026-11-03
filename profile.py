@@ -2,22 +2,27 @@
 
 import argparse
 import getpass
+import json
+import os
 import shlex
 import shutil
 import socket
 import subprocess
+import tempfile
 import time
 from datetime import datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from benchmark import query_metadata
+
 ROOT = Path(__file__).resolve().parent
-BUILD = ROOT / "build-profile"
+BUILD = ROOT / "build" / "profile"
 FLAMEGRAPH = Path.home() / "prometheus" / "dev" / "tools" / "FlameGraph"
 
 
-def build():
+def build(full_pipeline=False):
     subprocess.run(
         [
             "cmake",
@@ -27,7 +32,8 @@ def build():
             str(BUILD),
             "-DCMAKE_CXX_COMPILER=g++",
             "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
-            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O3 -g -DNDEBUG -march=native",
+            "-DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON",
+            "-DCMAKE_CXX_FLAGS_RELWITHDEBINFO=-O3 -g -DNDEBUG -march=native -fno-math-errno -fno-trapping-math",
         ],
         cwd=ROOT,
         check=True,
@@ -40,7 +46,7 @@ def build():
             "--config",
             "RelWithDebInfo",
             "--target",
-            "raytracer_bench",
+            "raytracer_bench" if full_pipeline else "raytracer_profile_rendering",
             "--parallel",
         ],
         cwd=ROOT,
@@ -48,15 +54,100 @@ def build():
     )
 
 
-def find_executable():
+def find_executable(full_pipeline=False):
+    target = "raytracer_bench" if full_pipeline else "raytracer_profile_rendering"
     for candidate in (
-        BUILD / "RelWithDebInfo" / "raytracer_bench",
-        BUILD / "raytracer_bench",
+        BUILD / "RelWithDebInfo" / target,
+        BUILD / target,
     ):
         if candidate.is_file():
             return candidate
 
-    raise RuntimeError("Cannot find raytracer_bench; build it first.")
+    raise RuntimeError(f"Cannot find {target}; build it first.")
+
+
+def record_profile(benchmark, profile_dir, events, full_pipeline=False):
+    mode = "full-pipeline" if full_pipeline else "render-only"
+    call_graph = "dwarf,16384" if full_pipeline else "fp"
+    scene_metadata = query_metadata(benchmark)
+    (profile_dir / "metadata.json").write_text(
+        json.dumps(
+            {
+                "mode": mode,
+                "profile_scope": "entire-process" if full_pipeline else "rendering",
+                "call_graph": call_graph,
+                "executable": str(benchmark),
+                "runs": 1,
+                "threads": 1,
+                **scene_metadata,
+            },
+            indent=2,
+        )
+        + "\n"
+    )
+    command = [
+        "perf",
+        "record",
+        "-o",
+        str(profile_dir / "perf.data"),
+        "-e",
+        ",".join(event for event, _, _, _ in events),
+        "-F",
+        "99",
+        "--call-graph",
+        call_graph,
+    ]
+    print(f"Recording {mode} into {profile_dir} (call graph: {call_graph})", flush=True)
+    with (profile_dir / "benchmark.log").open("wb") as log:
+        if full_pipeline:
+            print(
+                "perf includes scene loading, BVH construction, and rendering.",
+                flush=True,
+            )
+            subprocess.run(
+                [*command, "--", str(benchmark), "1"],
+                cwd=ROOT,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
+            return
+
+        # Start perf disabled. The dedicated profiling executable waits for an
+        # acknowledgement at each boundary so startup cannot leak into samples.
+        with tempfile.TemporaryDirectory(
+            prefix=".perf-control-", dir=profile_dir
+        ) as directory:
+            control = Path(directory) / "control"
+            ack = Path(directory) / "ack"
+            os.mkfifo(control, mode=0o600)
+            os.mkfifo(ack, mode=0o600)
+            print(
+                "Loading geometry and building the BVH once (not sampled); "
+                "perf will record rendering only.",
+                flush=True,
+            )
+            subprocess.run(
+                [
+                    *command,
+                    "--delay=-1",
+                    f"--control=fifo:{control},{ack}",
+                    "--",
+                    str(benchmark),
+                    "--runs",
+                    "1",
+                    "--threads",
+                    "1",
+                    "--perf-control",
+                    str(control),
+                    "--perf-ack",
+                    str(ack),
+                ],
+                cwd=ROOT,
+                stdout=log,
+                stderr=subprocess.STDOUT,
+                check=True,
+            )
 
 
 def run_with_progress(command, destination, description):
@@ -192,6 +283,11 @@ def main():
         description="Build, profile, and serve a ray tracer flamegraph."
     )
     parser.add_argument(
+        "--full-pipeline",
+        action="store_true",
+        help="use benchmark.cpp and profile loading, BVH construction, and rendering (default: rendering only)",
+    )
+    parser.add_argument(
         "--skip-build",
         action="store_true",
         help="reuse the existing benchmark executable",
@@ -324,9 +420,9 @@ def main():
         )
 
     if not args.skip_build:
-        build()
+        build(args.full_pipeline)
 
-    benchmark = find_executable()
+    benchmark = find_executable(args.full_pipeline)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
     profile_dir = ROOT / "benchmark-results" / f"profile-{timestamp}"
@@ -336,26 +432,7 @@ def main():
     data = profile_dir / "perf.data"
     stacks = profile_dir / "perf.script"
 
-    print(f"Recording into {profile_dir}", flush=True)
-    subprocess.run(
-        [
-            "perf",
-            "record",
-            "-o",
-            str(data),
-            "-e",
-            ",".join(event for event, _, _, _ in events),
-            "-F",
-            "99",
-            "--call-graph",
-            "dwarf,16384",
-            "--",
-            str(benchmark),
-        ],
-        cwd=ROOT,
-        stdout=subprocess.DEVNULL,
-        check=True,
-    )
+    record_profile(benchmark, profile_dir, events, args.full_pipeline)
 
     print(
         "\nRecording complete. Exporting and symbolizing DWARF stacks can take "
@@ -398,7 +475,7 @@ def main():
                 "perl",
                 str(FLAMEGRAPH / "flamegraph.pl"),
                 "--title",
-                f"Ray tracer — userspace {label}",
+                f"Ray tracer — {'full pipeline' if args.full_pipeline else 'rendering only'} — userspace {label}",
                 "--countname",
                 label,
                 str(folded),

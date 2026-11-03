@@ -1,51 +1,77 @@
-# TODO
-
--
-
 # Launch Codes
 
-Before building or executing must keep the cmake configuration up to date
+Run these commands from the repository root so relative asset paths resolve correctly. All generated build files live under `build/`.
 
-```bash
-cmake -S . -B build \
-  -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_BUILD_TYPE=Debug \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
-```
+CMake configures the project and generates build files for your compiler. The `cmake -S . -B ...` command selects the source directory, build directory, compiler, and build options. The `cmake --build ... --parallel` command compiles and links the executables using parallel jobs.
 
-To build the project run the following command from the root of the project
+## Release
 
-`cmake --build build`
+Optimized for rendering performance, with link-time optimization (LTO) enabled.
 
-Then to run the executable use
-
-`./build/raytracer > image.ppm`
-
-## In order to compile for speed use
-
-```bash
-cmake -S . -B release \
+```sh
+cmake -S . -B build/release \
   -DCMAKE_CXX_COMPILER=g++ \
   -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=native"
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -DNDEBUG -march=native -fno-math-errno -fno-trapping-math"
+
+cmake --build build/release --parallel
 ```
 
-`cmake --build release --parallel`
+Run:
 
-`./release/raytracer > image.ppm`
+```sh
+./build/release/raytracer > image.ppm
+```
 
-## For benchmarking
+## Profiling
 
-```bash
-cmake -S . -B build-profile \
+Optimized with debugging information retained and LTO enabled.
+
+```sh
+cmake -S . -B build/profile \
   -DCMAKE_CXX_COMPILER=g++ \
   -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-  -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG -march=native"
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=ON \
+  -DCMAKE_CXX_FLAGS_RELWITHDEBINFO="-O3 -g -DNDEBUG -march=native -fno-math-errno -fno-trapping-math"
+
+cmake --build build/profile --parallel
 ```
 
-`cmake --build build-profile -j --parallel`
+Run:
 
-`./build-profile/raytracer_bench > /dev/null`
+```sh
+./build/profile/raytracer > image.ppm
+```
+
+## Debug
+
+Disables optimizations and LTO, retains debugging information, and keeps assertions enabled.
+
+```sh
+cmake -S . -B build/debug \
+  -DCMAKE_CXX_COMPILER=g++ \
+  -DCMAKE_BUILD_TYPE=Debug \
+  -DCMAKE_INTERPROCEDURAL_OPTIMIZATION=OFF \
+  -DCMAKE_CXX_FLAGS_DEBUG="-O0 -g"
+
+cmake --build build/debug --parallel
+```
+
+Run:
+
+```sh
+./build/debug/raytracer > image.ppm
+```
+
+## Notes
+
+- `--parallel` allows the build tool to compile multiple files concurrently.
+- `-march=native` targets the current CPU. The executable may not run on older or different CPUs.
+- `-DNDEBUG` disables assertions in Release and Profiling builds.
+- LTO enables optimization across translation units, but it can make profiling call stacks harder to interpret.
+- For stack-sampling profilers, consider adding `-fno-omit-frame-pointer` to the profiling flags.
+- If a build directory was previously configured with a different compiler, delete that specific directory before configuring it with `g++`.
 
 ### Python benchmark script
 

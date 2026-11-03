@@ -11,16 +11,22 @@ add_executable(raytracer
 )
 
 add_executable(raytracer_bench src/benchmark.cpp)
+add_executable(raytracer_bench_rendering src/benchmark_rendering.cpp)
+add_executable(raytracer_profile_rendering src/profile_rendering.cpp)
 
-target_include_directories(raytracer_bench PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+# Preserve walkable stacks only for the dedicated perf executable; benchmark
+# targets retain their original optimized code generation.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(raytracer_profile_rendering PRIVATE
+        -fno-omit-frame-pointer
+        -fno-optimize-sibling-calls
+    )
+endif()
 
-target_include_directories(raytracer PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-
-foreach(target IN ITEMS raytracer raytracer_bench)
+foreach(target IN ITEMS raytracer raytracer_bench raytracer_bench_rendering raytracer_profile_rendering)
+    target_include_directories(${target} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+    )
     target_include_directories(${target} SYSTEM PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/pcg-cpp/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/third_party/happly"

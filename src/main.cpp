@@ -1,8 +1,10 @@
 
 
-#include "new_benchmark_scene.h"
-#include "real_scene.h"
-#include "triangle_test.h"
+#include "scenes/dragon_cage_scene.h"
+#include "scenes/dragon_mirror_scene.h"
+#include "scenes/old_benchmark_scene.h"
+#include "scenes/real_scene.h"
+#include "scenes/triangle_test.h"
 
 #include <scene.h>
 
@@ -92,7 +94,11 @@ int main() {
 
   // auto [camera, meshes] = create_triangle_test_scene();
   // auto [camera, meshes] = create_new_benchmark_scene();
-  auto [camera, meshes] = create_real_scene();
+  // auto [camera, meshes] = create_dragon_mirror_scene();
+  auto [camera, meshes] = create_dragon_cage_scene();
+  // auto [camera, meshes] = create_new_benchmark_scene();
+  // auto [camera, meshes] = create_real_scene();
+  //
   Scene<double> scene;
   scene.build(std::move(meshes));
   camera.render_multi_thread(scene, thread_count);
