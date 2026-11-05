@@ -5,6 +5,10 @@
 #include <mesh.h>
 #include <triangle.h>
 
+#ifdef RAYTRACER_TRAVERSAL_STATS
+#include <diagnostic/stats.h>
+#endif
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -259,6 +263,10 @@ public:
 
     assert(!nodes.empty());
 
+#ifdef RAYTRACER_TRAVERSAL_STATS
+    auto *stats = diagnostic::active_counters;
+#endif
+
     // Each thread gets its own persistent stack, reused across calls.
     // clear() removes elements but preserves capacity to avoid reallocations.
     thread_local std::vector<size_t> stack;
@@ -274,7 +282,15 @@ public:
       const BVHNode<T> &node = nodes[index];
 
       // Test the box
+#ifdef RAYTRACER_TRAVERSAL_STATS
+      if (stats)
+        ++stats->box_tests;
+#endif
       if (node.box.hit(r, interval, axis_direction_inv)) {
+#ifdef RAYTRACER_TRAVERSAL_STATS
+        if (stats)
+          ++stats->box_hits;
+#endif
 
         // internal node
         if (node.primitive_count == 0) {
@@ -304,17 +320,29 @@ public:
         }
 
         // leaf
+#ifdef RAYTRACER_TRAVERSAL_STATS
+        if (stats)
+          ++stats->leaf_visits;
+#endif
         for (size_t i = 0; i < node.primitive_count; ++i) {
           const size_t primitive_index = node.offset + i;
           const auto triangle_id = indexes[primitive_index];
           const auto &triangle = triangles[triangle_id];
           const auto &vertices = triangle.vertices;
 
+#ifdef RAYTRACER_TRAVERSAL_STATS
+          if (stats)
+            ++stats->triangle_tests;
+#endif
           auto candidate = intersect_triangle<T>(
               r, interval, positions[vertices.v0], positions[vertices.v1],
               positions[vertices.v2]);
 
           if (candidate) {
+#ifdef RAYTRACER_TRAVERSAL_STATS
+            if (stats)
+              ++stats->triangle_hits;
+#endif
             interval = Interval<T>{interval.min(), candidate->t};
             closest_hit = BVHHit<T>{
                 triangle_id,

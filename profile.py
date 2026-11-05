@@ -14,6 +14,7 @@ from datetime import datetime
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 from benchmark import query_metadata
 
@@ -259,7 +260,9 @@ def serve_flamegraph(svgs, port, ssh_host):
         actual_port = server.server_address[1]
         destination = shlex.quote(ssh_host)
 
-        urls = "\n".join(f"  http://localhost:{actual_port}/{svg.name}" for svg in svgs)
+        urls = "\n".join(
+            f"  http://localhost:{actual_port}/{quote(svg.name)}" for svg in svgs
+        )
         print(
             "\nFlamegraph server is running on this machine's loopback interface.\n"
             "\nRun this command in a terminal on your LOCAL machine:\n"
@@ -276,6 +279,36 @@ def serve_flamegraph(svgs, port, ssh_host):
             server.serve_forever()
         except KeyboardInterrupt:
             print("\nFlamegraph server stopped.")
+
+
+def serve_saved_profile(directory, port, ssh_host):
+    directory = directory.expanduser().resolve()
+    if not directory.is_dir():
+        raise RuntimeError(f"Profile directory not found: {directory}")
+    svgs = sorted(path for path in directory.glob("*.svg") if path.is_file())
+    if not svgs:
+        raise RuntimeError(f"No flamegraph SVG files found in: {directory}")
+
+    print(
+        f"\nServe existing profile: {directory}\n"
+        "No build, benchmark, perf recording, or graph generation will run.\n"
+        "The selected directory will be accessible through the local HTTP server.\n"
+        "Existing SVGs:\n" + "\n".join(f"  {svg.name}" for svg in svgs),
+        flush=True,
+    )
+    while True:
+        try:
+            answer = input("Start serving this directory? [y/N]: ").strip().lower()
+        except EOFError:
+            answer = "no"
+        if answer in ("", "n", "no"):
+            print("Serving cancelled.")
+            return
+        if answer in ("y", "yes"):
+            break
+        print("Please enter yes or no.")
+
+    serve_flamegraph(svgs, port, ssh_host)
 
 
 def main():
@@ -304,6 +337,12 @@ def main():
     )
     comparison = parser.add_mutually_exclusive_group()
     comparison.add_argument(
+        "--serve-only",
+        type=Path,
+        metavar="PROFILE_DIR",
+        help="serve existing SVGs after confirmation; do not build, profile, or generate files",
+    )
+    comparison.add_argument(
         "--compare-only",
         type=Path,
         nargs=2,
@@ -327,10 +366,31 @@ def main():
         default=f"{getpass.getuser()}@{socket.gethostname().split('.')[0]}",
         help="SSH destination (default: current user@short hostname)",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="save a new recording in this directory (must not already exist)",
+    )
+    parser.add_argument(
+        "--no-serve",
+        action="store_true",
+        help="generate graphs without starting the HTTP server",
+    )
     args = parser.parse_args()
+
+    if args.output_dir is not None and (
+        args.compare_only is not None or args.serve_only is not None
+    ):
+        parser.error("--output-dir cannot be used with --compare-only or --serve-only")
+    if args.no_serve and args.serve_only is not None:
+        parser.error("--no-serve cannot be used with --serve-only")
 
     if not 0 <= args.port <= 65535:
         parser.error("--port must be between 0 and 65535")
+
+    if args.serve_only is not None:
+        serve_saved_profile(args.serve_only, args.port, args.ssh_host)
+        return
 
     if args.compare_only and args.skip_consecutive:
         parser.error(
@@ -399,7 +459,8 @@ def main():
             generate_diff(baseline_dir, profile_dir, event, folded_name, label)
             for event, folded_name, _, label in events
         ]
-        serve_flamegraph(svgs, args.port, args.ssh_host)
+        if not args.no_serve:
+            serve_flamegraph(svgs, args.port, args.ssh_host)
         return
 
     if args.compare is not None:
@@ -425,9 +486,13 @@ def main():
     benchmark = find_executable(args.full_pipeline)
 
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
-    profile_dir = ROOT / "benchmark-results" / f"profile-{timestamp}"
-    profile_dir.parent.mkdir(parents=True, exist_ok=True)
-    profile_dir.mkdir()
+    if args.output_dir is not None:
+        profile_dir = args.output_dir.expanduser().resolve()
+        profile_dir.mkdir(parents=True, exist_ok=False)
+    else:
+        profile_dir = ROOT / "benchmark-results" / f"profile-{timestamp}"
+        profile_dir.parent.mkdir(parents=True, exist_ok=True)
+        profile_dir.mkdir()
 
     data = profile_dir / "perf.data"
     stacks = profile_dir / "perf.script"
@@ -491,7 +556,8 @@ def main():
                 generate_diff(args.compare, profile_dir, event, folded_name, label)
             )
 
-    serve_flamegraph(svgs, args.port, args.ssh_host)
+    if not args.no_serve:
+        serve_flamegraph(svgs, args.port, args.ssh_host)
 
 
 if __name__ == "__main__":

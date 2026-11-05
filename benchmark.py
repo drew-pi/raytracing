@@ -350,7 +350,15 @@ def parse_args(argv=None):
         action="store_true",
         help="print results without saving CSV or logs (asks for confirmation)",
     )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="save results in this new directory (must not already exist)",
+    )
     args = parser.parse_args(argv)
+
+    if args.output_dir is not None and args.no_save:
+        parser.error("--output-dir cannot be used with --no-save")
 
     if not 1 <= args.runs <= 2_147_483_647:
         parser.error("--runs must be between 1 and 2147483647")
@@ -400,10 +408,14 @@ def main():
     results_dir = None
     csv_path = None
     if not args.no_save:
-        results_root = ROOT / "benchmark-results"
-        results_root.mkdir(exist_ok=True)
-        prefix = f"run-{args.name}-" if args.name else "run-"
-        results_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=results_root))
+        if args.output_dir is not None:
+            results_dir = args.output_dir.expanduser().resolve()
+            results_dir.mkdir(parents=True, exist_ok=False)
+        else:
+            results_root = ROOT / "benchmark-results"
+            results_root.mkdir(exist_ok=True)
+            prefix = f"run-{args.name}-" if args.name else "run-"
+            results_dir = Path(tempfile.mkdtemp(prefix=prefix, dir=results_root))
         csv_path = results_dir / "timings.csv"
         (results_dir / "metadata.json").write_text(
             json.dumps(

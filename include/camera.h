@@ -15,6 +15,10 @@
 #include <utility.h>
 #include <vec3.h>
 
+#ifdef RAYTRACER_TRAVERSAL_STATS
+#include <diagnostic/stats.h>
+#endif
+
 template <std::floating_point T> class Camera {
 public:
   T aspect_ratio = T{1.0};
@@ -132,6 +136,10 @@ public:
   [[nodiscard]] Color<T> render_checksum(const Scene<T> &scene,
                                          const int thread_count,
                                          bool show_progress = false) {
+#ifdef RAYTRACER_TRAVERSAL_STATS
+    if (thread_count != 1)
+      throw std::invalid_argument("Diagnostic rendering requires one worker");
+#endif
     assert(thread_count > 0);
 
     initialize();
@@ -308,6 +316,10 @@ private:
     if (depth <= 0) {
       return Color<T>(0, 0, 0);
     }
+
+#ifdef RAYTRACER_TRAVERSAL_STATS
+    diagnostic::QueryScope query(max_depth - depth);
+#endif
 
     auto interval = Interval<T>::standard();
 
