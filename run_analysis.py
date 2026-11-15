@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run benchmark, diagnostic, and profiling sequentially as one saved analysis."""
+"""Run renderer analysis, optionally followed by BVH construction analysis."""
 
 import argparse
 import csv
@@ -193,7 +193,7 @@ def write_assembly_dump(assembly):
         ) from error
 
 
-def collect_summary(results, validation, runs, full_pipeline):
+def collect_summary(results, validation, runs, full_pipeline, focus):
     def milliseconds(value):
         if isinstance(value, bool):
             raise ValueError("boolean timing")
@@ -227,7 +227,8 @@ def collect_summary(results, validation, runs, full_pipeline):
                 raise ValueError(f"negative diagnostic {key}")
             totals[key] = sum(values)
 
-        return {
+        summary = {
+            "focus": focus,
             "render_mean_ms": statistics.mean(render_times),
             "render_stddev_ms": statistics.stdev(render_times) if runs > 1 else None,
             "render_runs": runs,
@@ -236,6 +237,18 @@ def collect_summary(results, validation, runs, full_pipeline):
             "build_time_ms": build_ms,
             "build_time_kind": "mean_per_trial" if full_pipeline else "one_time",
         }
+        if focus == "full":
+            with (results / "construction" / "construction.csv").open(
+                newline=""
+            ) as output:
+                construction = list(csv.DictReader(output))
+            if not construction:
+                raise ValueError("construction analysis has no cases")
+            summary["construction_cases"] = len(construction)
+            summary["construction_results"] = str(
+                results / "construction" / "construction.csv"
+            )
+        return summary
     except (OSError, ValueError, TypeError, KeyError, OverflowError) as error:
         raise RuntimeError(f"Cannot summarize run results: {error}") from error
 
@@ -261,12 +274,24 @@ def format_summary(summary):
         f"Triangle tests:  {summary['triangle_tests']:,}\n"
         f"Build time:      {summary['build_time_ms']:.3f} ms ({build_kind})\n"
         "Traversal counts are for one diagnostic render, summed over all bounce depths.\n"
+        + (
+            f"Construction cases: {summary['construction_cases']} "
+            f"({summary['construction_results']})\n"
+            if summary["focus"] == "full"
+            else ""
+        )
     )
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--name", required=True, help="descriptive run name")
+    parser.add_argument(
+        "--focus",
+        choices=("renderer", "full"),
+        default="renderer",
+        help="renderer runs the existing workflow; full additionally analyzes BVH construction",
+    )
     parser.add_argument(
         "--date",
         type=date.fromisoformat,
@@ -281,6 +306,17 @@ def main(argv=None):
     )
     parser.add_argument(
         "--skip-build", action="store_true", help="reuse all existing executables"
+    )
+    parser.add_argument(
+        "--construction-runs",
+        type=int,
+        default=3,
+        help="BVH build repetitions per construction case in full focus (default: 3)",
+    )
+    parser.add_argument(
+        "--construction-sizes",
+        default="1000,10000,100000,1000000",
+        help="comma-separated synthetic triangle counts in full focus",
     )
     parser.add_argument(
         "--full-pipeline",
@@ -300,6 +336,10 @@ def main(argv=None):
         )
     if not 1 <= args.runs <= 2_147_483_647:
         parser.error("--runs must be between 1 and 2147483647")
+    if not 1 <= args.construction_runs <= 2_147_483_647:
+        parser.error("--construction-runs must be between 1 and 2147483647")
+    if not re.fullmatch(r"[1-9][0-9]*(,[1-9][0-9]*)*", args.construction_sizes):
+        parser.error("--construction-sizes must be comma-separated positive integers")
 
     disassembler = shutil.which("objdump") or shutil.which("llvm-objdump")
     if disassembler is None:
@@ -319,6 +359,7 @@ def main(argv=None):
 
     metadata = {
         "name": args.name,
+        "focus": args.focus,
         "date": args.date.isoformat(),
         "git": {"commit": commit, "dirty": bool(git_status), "status": git_status},
         "started_at": timestamp(),
@@ -366,6 +407,28 @@ def main(argv=None):
                 "log": str(results / f"{name}.log"),
             }
         )
+    if args.focus == "full":
+        command = [
+            sys.executable,
+            str(ROOT / "construction_analysis.py"),
+            "--output-dir",
+            str(results / "construction"),
+            "--runs",
+            str(args.construction_runs),
+            "--sizes",
+            args.construction_sizes,
+        ]
+        if args.skip_build:
+            command.append("--skip-build")
+        metadata["stages"].append(
+            {
+                "name": "construction",
+                "command": command,
+                "status": "pending",
+                "output_directory": str(results / "construction"),
+                "log": str(results / "construction.log"),
+            }
+        )
 
     def save():
         (results / "metadata.json").write_text(
@@ -405,6 +468,23 @@ def main(argv=None):
                 raise RuntimeError(
                     f"{stage['name']} failed with exit code {result.returncode}; see {stage['log']}"
                 )
+            if stage["name"] == "construction":
+                try:
+                    construction_metadata = json.loads(
+                        (Path(stage["output_directory"]) / "metadata.json").read_text()
+                    )
+                    if construction_metadata.get("case_count", 0) <= 0:
+                        raise ValueError("no construction cases were recorded")
+                    stage["case_count"] = construction_metadata["case_count"]
+                except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+                    stage.update(status="failed", error=str(error))
+                    raise RuntimeError(
+                        f"Cannot validate construction results: {error}"
+                    ) from error
+                save()
+                print("construction completed.", flush=True)
+                continue
+
             validation = metadata["checksum_validation"]
             try:
                 report = read_stage_results(
@@ -453,7 +533,11 @@ def main(argv=None):
         print("\nWriting benchmark assembly dump...", flush=True)
         write_assembly_dump(metadata["assembly_dump"])
         metadata["summary"] = collect_summary(
-            results, metadata["checksum_validation"], args.runs, args.full_pipeline
+            results,
+            metadata["checksum_validation"],
+            args.runs,
+            args.full_pipeline,
+            args.focus,
         )
         summary_text = format_summary(metadata["summary"])
         (results / "summary.json").write_text(
@@ -475,7 +559,9 @@ def main(argv=None):
             metadata["assembly_dump"]["status"] = "skipped"
         metadata["finished_at"] = timestamp()
         save()
-    print(f"\nAll three workflows completed with exactly matching checksums: {results}")
+    print(f"\nRenderer workflows completed with exactly matching checksums: {results}")
+    if args.focus == "full":
+        print("BVH construction analysis also completed.")
     print(f"Assembly dump: {metadata['assembly_dump']['path']}")
     view_command = [
         sys.executable,

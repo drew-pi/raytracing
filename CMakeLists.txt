@@ -14,6 +14,7 @@ add_executable(raytracer_bench src/benchmark.cpp)
 add_executable(raytracer_bench_rendering src/benchmark_rendering.cpp)
 add_executable(raytracer_profile_rendering src/profile_rendering.cpp)
 add_executable(raytracer_diagnostic src/diagnostic.cpp)
+add_executable(raytracer_construction src/construction.cpp)
 target_compile_definitions(raytracer_diagnostic PRIVATE RAYTRACER_TRAVERSAL_STATS=1)
 
 # Preserve walkable stacks only for the dedicated perf executable; benchmark
@@ -25,7 +26,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     )
 endif()
 
-foreach(target IN ITEMS raytracer raytracer_bench raytracer_bench_rendering raytracer_profile_rendering raytracer_diagnostic)
+foreach(target IN ITEMS raytracer raytracer_bench raytracer_bench_rendering raytracer_profile_rendering raytracer_diagnostic raytracer_construction)
     target_include_directories(${target} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )

@@ -19,6 +19,20 @@
 #include <span>
 #include <vector>
 
+template <std::floating_point T> struct BVHStatistics {
+  std::size_t triangle_count = 0;
+  std::size_t node_count = 0;
+  std::size_t internal_node_count = 0;
+  std::size_t leaf_count = 0;
+  std::size_t maximum_depth = 0;
+  double average_leaf_depth = 0;
+  double average_primitives_per_leaf = 0;
+  std::uint32_t maximum_primitives_in_leaf = 0;
+  double estimated_sah_cost = 0;
+  std::size_t node_bytes = 0;
+  std::size_t index_bytes = 0;
+};
+
 template <std::floating_point T> struct BVHNode {
   BoundingBox<T> box;
 
@@ -34,6 +48,8 @@ template <std::floating_point T> class BVH {
 private:
   std::vector<BVHNode<T>> nodes;
   std::vector<std::uint32_t> indexes;
+  static constexpr T intersection_cost = T{0.5};
+  static constexpr T traversal_cost = T{1};
 
   void build(const std::vector<point3<T>> &positions,
              const std::vector<SceneTriangle> &triangles,
@@ -185,11 +201,8 @@ private:
     assert(best_split_point > start && best_split_point < end);
 
     // leaf creation criterion
-    const T C_isect = T{0.5}; // relative cost of a triangle intersection
-    const T C_trav = T{1};    // relative cost of traversing an internal node
-
-    const T leaf_cost = T(triangle_count) * C_isect;
-    const T split_cost = C_trav + C_isect * lowest_sah;
+    const T leaf_cost = T(triangle_count) * intersection_cost;
+    const T split_cost = traversal_cost + intersection_cost * lowest_sah;
 
     if (leaf_cost <= split_cost) {
       size_t primitive_index = indexes.size();
@@ -254,6 +267,60 @@ public:
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {
     assert(!nodes.empty());
     return nodes.front().box;
+  }
+
+  [[nodiscard]] BVHStatistics<T> statistics() const {
+    assert(!nodes.empty());
+
+    BVHStatistics<T> result;
+    result.triangle_count = indexes.size();
+    result.node_count = nodes.size();
+    result.node_bytes = nodes.capacity() * sizeof(BVHNode<T>);
+    result.index_bytes = indexes.capacity() * sizeof(std::uint32_t);
+
+    const T root_area = nodes.front().box.surface_area();
+    assert(std::isfinite(root_area) && root_area > T{0});
+
+    struct Entry {
+      std::size_t index;
+      std::size_t depth;
+    };
+    std::vector<Entry> pending{{0, 0}};
+    std::size_t leaf_depth_sum = 0;
+    std::size_t leaf_primitive_sum = 0;
+
+    while (!pending.empty()) {
+      const Entry entry = pending.back();
+      pending.pop_back();
+      const BVHNode<T> &node = nodes[entry.index];
+      result.maximum_depth = std::max(result.maximum_depth, entry.depth);
+
+      const double probability =
+          static_cast<double>(node.box.surface_area() / root_area);
+      if (node.primitive_count == 0) {
+        ++result.internal_node_count;
+        result.estimated_sah_cost +=
+            probability * static_cast<double>(traversal_cost);
+        pending.push_back({node.offset, entry.depth + 1});
+        pending.push_back({entry.index + 1, entry.depth + 1});
+      } else {
+        ++result.leaf_count;
+        leaf_depth_sum += entry.depth;
+        leaf_primitive_sum += node.primitive_count;
+        result.maximum_primitives_in_leaf =
+            std::max(result.maximum_primitives_in_leaf, node.primitive_count);
+        result.estimated_sah_cost += probability *
+                                     static_cast<double>(intersection_cost) *
+                                     static_cast<double>(node.primitive_count);
+      }
+    }
+
+    assert(result.leaf_count > 0);
+    result.average_leaf_depth =
+        static_cast<double>(leaf_depth_sum) / result.leaf_count;
+    result.average_primitives_per_leaf =
+        static_cast<double>(leaf_primitive_sum) / result.leaf_count;
+    return result;
   }
 
   [[nodiscard]] std::optional<BVHHit<T>>
