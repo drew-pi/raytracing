@@ -55,6 +55,8 @@ private:
     int axis = -1;
     size_t position = 0;
     T sah = std::numeric_limits<T>::infinity();
+    BoundingBox<T> left_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_bounds = BoundingBox<T>::empty();
   };
 
 #ifdef RAYTRACER_BVH_STATS
@@ -135,20 +137,20 @@ private:
     };
   }
 
-  [[nodiscard]] SplitCandidate
+  [[nodiscard]] static SplitCandidate
   evaluate_axis_splits(std::vector<BuildPrimitive> &primitives, size_t start,
-                       size_t end, int axis, T parent_surface_area) {
-    assert(start < end);
-    assert(end <= primitives.size());
-    assert(axis >= 0 && axis < 3);
+                       size_t end, int axis, T parent_surface_area,
+                       std::vector<BoundingBox<T>> &right_bounds) {
 
     const size_t primitive_count = end - start;
 
+    assert(start < end);
+    assert(end <= primitives.size());
+    assert(axis >= 0 && axis < 3);
+    assert(right_bounds.size() >= primitive_count);
+
     std::sort(primitives.begin() + start, primitives.begin() + end,
               centroid_comparator(axis));
-
-    std::vector<BoundingBox<T>> right_bounds(primitive_count,
-                                             BoundingBox<T>::empty());
 
     right_bounds[primitive_count - 1] = primitives[end - 1].box;
 
@@ -174,6 +176,8 @@ private:
       if (sah < best.sah) {
         best.position = start + offset;
         best.sah = sah;
+        best.left_bounds = left_bounds;
+        best.right_bounds = right_bounds[offset];
       }
 
       left_bounds = BoundingBox<T>(left_bounds, primitives[start + offset].box);
@@ -184,16 +188,23 @@ private:
 
   [[nodiscard]] SplitCandidate
   find_best_split(std::vector<BuildPrimitive> &primitives, size_t start,
-                  size_t end, T parent_surface_area) {
+                  size_t end, T parent_surface_area,
+                  std::vector<BoundingBox<T>> &right_bounds) {
+    const size_t primitive_count = end - start;
+
     SplitCandidate best;
 
     for (int axis = 0; axis < 3; ++axis) {
       const SplitCandidate candidate = evaluate_axis_splits(
-          primitives, start, end, axis, parent_surface_area);
+          primitives, start, end, axis, parent_surface_area, right_bounds);
 
       if (candidate.sah < best.sah)
         best = candidate;
     }
+
+    assert(best.axis >= 0 && best.axis < 3);
+    assert(best.position > start && best.position < end);
+    assert(std::isfinite(best.sah));
 
     if (best.axis != 2) {
       std::sort(primitives.begin() + start, primitives.begin() + end,
@@ -204,12 +215,12 @@ private:
   }
 
   void build_range(std::vector<BuildPrimitive> &primitives, size_t start,
-                   size_t end) {
+                   size_t end, const BoundingBox<T> &bounds,
+                   std::vector<BoundingBox<T>> &right_bounds) {
     assert(start < end);
     assert(end <= primitives.size());
 
     const size_t primitive_count = end - start;
-    const BoundingBox<T> bounds = range_bounds(primitives, start, end);
 
     if (primitive_count <= 2) {
       emit_leaf(primitives, start, end, bounds);
@@ -221,8 +232,8 @@ private:
     assert(std::isfinite(parent_surface_area));
     assert(parent_surface_area > T{0});
 
-    const SplitCandidate split =
-        find_best_split(primitives, start, end, parent_surface_area);
+    const SplitCandidate split = find_best_split(
+        primitives, start, end, parent_surface_area, right_bounds);
 
     const T leaf_cost = T(primitive_count) * intersection_cost;
     const T split_cost = traversal_cost + intersection_cost * split.sah;
@@ -241,10 +252,11 @@ private:
         static_cast<std::uint8_t>(split.axis),
     });
 
-    build_range(primitives, start, split.position);
+    build_range(primitives, start, split.position, split.left_bounds);
 
     const size_t right_child = nodes.size();
-    build_range(primitives, split.position, end);
+
+    build_range(primitives, split.position, end, split.right_bounds);
 
     nodes[node_index].offset = right_child;
   }
@@ -262,7 +274,11 @@ public:
     indexes.reserve(triangles.size());
     nodes.reserve(2 * triangles.size() - 1);
 
-    build_range(primitives, 0, primitives.size());
+    const BoundingBox<T> root_bounds =
+        range_bounds(primitives, 0, primitives.size());
+    std::vector<BoundingBox<T>> right_bounds(primitives.size());
+
+    build_range(primitives, 0, primitives.size(), root_bounds, right_bounds);
   }
 
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {
@@ -274,7 +290,6 @@ public:
   hit(const Ray<T> &r, Interval<T> interval,
       std::span<const point3<T>> positions,
       std::span<const SceneTriangle> triangles) const {
-
     assert(!nodes.empty());
 
 #ifdef RAYTRACER_TRAVERSAL_STATS
