@@ -1,6 +1,7 @@
 #include "scenes/benchmark_scene.h"
 
 #include <bvh.h>
+#include <diagnostic/bvh_stats.h>
 
 #include <algorithm>
 #include <charconv>
@@ -206,7 +207,7 @@ void write_case(std::string_view scene, std::string_view category,
   using Clock = std::chrono::steady_clock;
   std::vector<double> times;
   times.reserve(static_cast<std::size_t>(runs));
-  BVHStatistics<double> expected;
+  diagnostic::BVHStatistics<double> expected;
 
   for (int run = 0; run < runs; ++run) {
     const auto begin = Clock::now();
@@ -214,7 +215,7 @@ void write_case(std::string_view scene, std::string_view category,
     const auto end = Clock::now();
     times.push_back(
         std::chrono::duration<double, std::milli>(end - begin).count());
-    const auto stats = bvh.statistics();
+    const auto stats = diagnostic::bvh_statistics(bvh);
     if (run == 0) {
       expected = stats;
     } else if (stats.node_count != expected.node_count ||

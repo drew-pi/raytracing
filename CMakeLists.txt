@@ -16,6 +16,7 @@ add_executable(raytracer_profile_rendering src/profile_rendering.cpp)
 add_executable(raytracer_diagnostic src/diagnostic.cpp)
 add_executable(raytracer_construction src/construction.cpp)
 target_compile_definitions(raytracer_diagnostic PRIVATE RAYTRACER_TRAVERSAL_STATS=1)
+target_compile_definitions(raytracer_construction PRIVATE RAYTRACER_BVH_STATS=1)
 
 # Preserve walkable stacks only for the dedicated perf executable; benchmark
 # targets retain their original optimized code generation.
