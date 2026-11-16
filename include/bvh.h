@@ -51,12 +51,20 @@ private:
     std::uint32_t primitive_id;
   };
 
+  struct BuildData {
+    std::vector<BuildPrimitive> primitives;
+    BoundingBox<T> primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> centroid_bounds = BoundingBox<T>::empty();
+  };
+
   struct SplitCandidate {
     int axis = -1;
     size_t position = 0;
     T sah = std::numeric_limits<T>::infinity();
-    BoundingBox<T> left_bounds = BoundingBox<T>::empty();
-    BoundingBox<T> right_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_centroid_bounds = BoundingBox<T>::empty();
   };
 
   static constexpr int bin_count = 16;
@@ -67,8 +75,12 @@ private:
     T minimum = T{0};
     T maximum = T{0};
     T sah = std::numeric_limits<T>::infinity();
-    BoundingBox<T> left_bounds = BoundingBox<T>::empty();
-    BoundingBox<T> right_bounds = BoundingBox<T>::empty();
+
+    BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_primitive_bounds = BoundingBox<T>::empty();
+
+    BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_centroid_bounds = BoundingBox<T>::empty();
   };
 
 #ifdef RAYTRACER_BVH_STATS
@@ -77,10 +89,13 @@ private:
   diagnostic::bvh_statistics(const BVH<U> &bvh);
 #endif
 
-  [[nodiscard]] static std::vector<BuildPrimitive>
+  [[nodiscard]] static BuildData
   make_build_primitives(const std::vector<point3<T>> &positions,
                         const std::vector<SceneTriangle> &triangles) {
     std::vector<BuildPrimitive> primitives;
+    BoundingBox<T> primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> centroid_bounds = BoundingBox<T>::empty();
+
     primitives.reserve(triangles.size());
 
     for (std::uint32_t primitive_id = 0; primitive_id < triangles.size();
@@ -93,24 +108,16 @@ private:
           box.centroid(),
           primitive_id,
       });
+
+      primitive_bounds.expand(primitives.back().box);
+      centroid_bounds.expand(primitives.back().centroid);
     }
 
-    return primitives;
-  }
-
-  [[nodiscard]] static BoundingBox<T>
-  range_bounds(const std::vector<BuildPrimitive> &primitives, size_t start,
-               size_t end) {
-    assert(start < end);
-    assert(end <= primitives.size());
-
-    BoundingBox<T> bounds = primitives[start].box;
-
-    for (size_t i = start + 1; i < end; ++i) {
-      bounds = BoundingBox<T>(bounds, primitives[i].box);
-    }
-
-    return bounds;
+    return BuildData{
+        .primitives = std::move(primitives),
+        .primitive_bounds = primitive_bounds,
+        .centroid_bounds = centroid_bounds,
+    };
   }
 
   void emit_leaf(const std::vector<BuildPrimitive> &primitives, size_t start,
@@ -146,12 +153,13 @@ private:
                       bin_count - 1);
   }
 
-  BinnedSplitCandidate
-  evaluate_binned_splits(std::vector<BuildPrimitive> &primitives, size_t start,
-                         size_t end, int axis, T parent_surface_area) {
-
+  [[nodiscard]] static BinnedSplitCandidate
+  evaluate_binned_splits(const std::vector<BuildPrimitive> &primitives,
+                         size_t start, size_t end, int axis,
+                         T parent_surface_area, T minimum, T maximum) {
     struct Bin {
-      BoundingBox<T> bounds = BoundingBox<T>::empty();
+      BoundingBox<T> primitive_bounds = BoundingBox<T>::empty();
+      BoundingBox<T> centroid_bounds = BoundingBox<T>::empty();
       std::uint32_t count = 0;
     };
 
@@ -159,14 +167,6 @@ private:
     assert(end <= primitives.size());
     assert(axis >= 0 && axis < 3);
     assert(parent_surface_area > T{0});
-
-    T minimum = primitives[start].centroid[axis];
-    T maximum = minimum;
-
-    for (size_t i = start + 1; i < end; ++i) {
-      minimum = std::min(minimum, primitives[i].centroid[axis]);
-      maximum = std::max(maximum, primitives[i].centroid[axis]);
-    }
 
     BinnedSplitCandidate best{
         .axis = axis,
@@ -181,29 +181,42 @@ private:
     std::array<Bin, bin_count> bins{};
 
     for (size_t i = start; i < end; ++i) {
-      Bin &bin = bins[bin_index(primitives[i], minimum, maximum, axis)];
+      const BuildPrimitive &primitive = primitives[i];
+      Bin &bin = bins[bin_index(primitive, minimum, maximum, axis)];
+
       ++bin.count;
-      bin.bounds = BoundingBox<T>(bin.bounds, primitives[i].box);
+      bin.primitive_bounds.expand(primitive.box);
+      bin.centroid_bounds.expand(primitive.centroid);
     }
 
-    // suffix sweep (suffix[i] includes all i, i+1, ..., number_bins-1)
-    std::array<BoundingBox<T>, bin_count> suffix_bounds;
+    // suffix sweep (suffix[i] includes all i, i+1, ..., bin_count-1)
+    std::array<BoundingBox<T>, bin_count> suffix_primitive_bounds;
+    std::array<BoundingBox<T>, bin_count> suffix_centroid_bounds;
     std::array<std::uint32_t, bin_count> suffix_counts{};
 
-    suffix_bounds[bin_count - 1] = bins[bin_count - 1].bounds;
+    suffix_primitive_bounds[bin_count - 1] =
+        bins[bin_count - 1].primitive_bounds;
+    suffix_centroid_bounds[bin_count - 1] = bins[bin_count - 1].centroid_bounds;
     suffix_counts[bin_count - 1] = bins[bin_count - 1].count;
 
     for (int i = bin_count - 2; i >= 0; --i) {
-      suffix_bounds[i] = BoundingBox<T>(bins[i].bounds, suffix_bounds[i + 1]);
+      suffix_primitive_bounds[i] = suffix_primitive_bounds[i + 1];
+      suffix_primitive_bounds[i].expand(bins[i].primitive_bounds);
+
+      suffix_centroid_bounds[i] = suffix_centroid_bounds[i + 1];
+      suffix_centroid_bounds[i].expand(bins[i].centroid_bounds);
+
       suffix_counts[i] = bins[i].count + suffix_counts[i + 1];
     }
 
     // prefix sweep (prefix includes all 0, ..., i)
-    BoundingBox<T> left_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
     std::uint32_t left_count = 0;
 
     for (int i = 0; i < bin_count - 1; ++i) {
-      left_bounds = BoundingBox<T>(left_bounds, bins[i].bounds);
+      left_primitive_bounds.expand(bins[i].primitive_bounds);
+      left_centroid_bounds.expand(bins[i].centroid_bounds);
       left_count += bins[i].count;
 
       const std::uint32_t right_count = suffix_counts[i + 1];
@@ -212,15 +225,21 @@ private:
         continue;
 
       const T sah =
-          (left_bounds.surface_area() / parent_surface_area) * T(left_count) +
-          (suffix_bounds[i + 1].surface_area() / parent_surface_area) *
+          (left_primitive_bounds.surface_area() / parent_surface_area) *
+              T(left_count) +
+          (suffix_primitive_bounds[i + 1].surface_area() /
+           parent_surface_area) *
               T(right_count);
 
       if (sah < best.sah) {
         best.bin = i;
         best.sah = sah;
-        best.left_bounds = left_bounds;
-        best.right_bounds = suffix_bounds[i + 1];
+
+        best.left_primitive_bounds = left_primitive_bounds;
+        best.right_primitive_bounds = suffix_primitive_bounds[i + 1];
+
+        best.left_centroid_bounds = left_centroid_bounds;
+        best.right_centroid_bounds = suffix_centroid_bounds[i + 1];
       }
     }
 
@@ -243,66 +262,121 @@ private:
     };
   }
 
+  [[nodiscard]] SplitCandidate
+  degenerate_split(std::vector<BuildPrimitive> &primitives, size_t start,
+                   size_t end, int axis, T parent_surface_area) {
+
+    const size_t middle = start + (end - start) / 2;
+
+    std::nth_element(primitives.begin() + start, primitives.begin() + middle,
+                     primitives.begin() + end, centroid_comparator(axis));
+
+    BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> right_centroid_bounds = BoundingBox<T>::empty();
+
+    for (size_t i = start; i < middle; ++i) {
+      left_primitive_bounds.expand(primitives[i].box);
+      left_centroid_bounds.expand(primitives[i].centroid);
+    }
+
+    for (size_t i = middle; i < end; ++i) {
+      right_primitive_bounds.expand(primitives[i].box);
+      right_centroid_bounds.expand(primitives[i].centroid);
+    }
+
+    const T sah =
+        (left_primitive_bounds.surface_area() / parent_surface_area) *
+            T(middle - start) +
+        (right_primitive_bounds.surface_area() / parent_surface_area) *
+            T(end - middle);
+
+    return SplitCandidate{
+        .axis = axis,
+        .position = middle,
+        .sah = sah,
+        .left_primitive_bounds = left_primitive_bounds,
+        .right_primitive_bounds = right_primitive_bounds,
+        .left_centroid_bounds = left_centroid_bounds,
+        .right_centroid_bounds = right_centroid_bounds,
+    };
+  }
+
   [[nodiscard]] static SplitCandidate
-  evaluate_axis_splits(std::vector<BuildPrimitive> &primitives, size_t start,
-                       size_t end, int axis, T parent_surface_area,
-                       std::vector<BoundingBox<T>> &right_bounds) {
-
-    const size_t primitive_count = end - start;
-
+  evaluate_exact_axis_splits(std::vector<BuildPrimitive> &primitives,
+                             size_t start, size_t end, int axis,
+                             T parent_surface_area) {
     assert(start < end);
     assert(end <= primitives.size());
     assert(axis >= 0 && axis < 3);
-    assert(right_bounds.size() >= primitive_count);
+
+    const size_t primitive_count = end - start;
 
     std::sort(primitives.begin() + start, primitives.begin() + end,
               centroid_comparator(axis));
 
-    right_bounds[primitive_count - 1] = primitives[end - 1].box;
+    std::vector<BoundingBox<T>> suffix_primitive_bounds(
+        primitive_count, BoundingBox<T>::empty());
+    std::vector<BoundingBox<T>> suffix_centroid_bounds(primitive_count,
+                                                       BoundingBox<T>::empty());
+
+    suffix_primitive_bounds.back() = primitives[end - 1].box;
+    suffix_centroid_bounds.back().expand(primitives[end - 1].centroid);
 
     for (size_t offset = primitive_count - 1; offset > 0; --offset) {
-      right_bounds[offset - 1] = BoundingBox<T>(
-          primitives[start + offset - 1].box, right_bounds[offset]);
+      suffix_primitive_bounds[offset - 1] = suffix_primitive_bounds[offset];
+      suffix_primitive_bounds[offset - 1].expand(
+          primitives[start + offset - 1].box);
+
+      suffix_centroid_bounds[offset - 1] = suffix_centroid_bounds[offset];
+      suffix_centroid_bounds[offset - 1].expand(
+          primitives[start + offset - 1].centroid);
     }
 
-    SplitCandidate best{
-        .axis = axis,
-        .position = 0,
-        .sah = std::numeric_limits<T>::infinity(),
-    };
+    SplitCandidate best;
+    best.axis = axis;
 
-    BoundingBox<T> left_bounds = primitives[start].box;
+    BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
+    BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
+
+    left_primitive_bounds.expand(primitives[start].box);
+    left_centroid_bounds.expand(primitives[start].centroid);
 
     for (size_t offset = 1; offset < primitive_count; ++offset) {
       const T sah =
-          (left_bounds.surface_area() / parent_surface_area) * T(offset) +
-          (right_bounds[offset].surface_area() / parent_surface_area) *
+          (left_primitive_bounds.surface_area() / parent_surface_area) *
+              T(offset) +
+          (suffix_primitive_bounds[offset].surface_area() /
+           parent_surface_area) *
               T(primitive_count - offset);
 
       if (sah < best.sah) {
         best.position = start + offset;
         best.sah = sah;
-        best.left_bounds = left_bounds;
-        best.right_bounds = right_bounds[offset];
+
+        best.left_primitive_bounds = left_primitive_bounds;
+        best.right_primitive_bounds = suffix_primitive_bounds[offset];
+
+        best.left_centroid_bounds = left_centroid_bounds;
+        best.right_centroid_bounds = suffix_centroid_bounds[offset];
       }
 
-      left_bounds = BoundingBox<T>(left_bounds, primitives[start + offset].box);
+      left_primitive_bounds.expand(primitives[start + offset].box);
+      left_centroid_bounds.expand(primitives[start + offset].centroid);
     }
 
     return best;
   }
 
-  [[nodiscard]] SplitCandidate
+  [[nodiscard]] static SplitCandidate
   find_best_exact_split(std::vector<BuildPrimitive> &primitives, size_t start,
-                        size_t end, T parent_surface_area,
-                        std::vector<BoundingBox<T>> &right_bounds) {
-    const size_t primitive_count = end - start;
-
+                        size_t end, T parent_surface_area) {
     SplitCandidate best;
 
     for (int axis = 0; axis < 3; ++axis) {
-      const SplitCandidate candidate = evaluate_axis_splits(
-          primitives, start, end, axis, parent_surface_area, right_bounds);
+      const SplitCandidate candidate = evaluate_exact_axis_splits(
+          primitives, start, end, axis, parent_surface_area);
 
       if (candidate.sah < best.sah)
         best = candidate;
@@ -312,6 +386,7 @@ private:
     assert(best.position > start && best.position < end);
     assert(std::isfinite(best.sah));
 
+    // The final evaluation leaves the range sorted on axis 2.
     if (best.axis != 2) {
       std::sort(primitives.begin() + start, primitives.begin() + end,
                 centroid_comparator(best.axis));
@@ -322,14 +397,26 @@ private:
 
   [[nodiscard]] SplitCandidate
   find_best_split(std::vector<BuildPrimitive> &primitives, size_t start,
-                  size_t end, T parent_surface_area,
-                  std::vector<BoundingBox<T>> &right_bounds) {
+                  size_t end, const BoundingBox<T> &primitive_bounds,
+                  const BoundingBox<T> &centroid_bounds) {
 
     BinnedSplitCandidate best;
 
+    const T parent_surface_area = primitive_bounds.surface_area();
+
+    assert(std::isfinite(parent_surface_area));
+    assert(parent_surface_area > T{0});
+
     for (int axis = 0; axis < 3; ++axis) {
+      T minimum = centroid_bounds.minimum(axis);
+      T maximum = centroid_bounds.maximum(axis);
+
+      if (minimum == maximum) {
+        continue;
+      }
+
       const BinnedSplitCandidate candidate = evaluate_binned_splits(
-          primitives, start, end, axis, parent_surface_area);
+          primitives, start, end, axis, parent_surface_area, minimum, maximum);
 
       if (candidate.sah < best.sah)
         best = candidate;
@@ -337,8 +424,12 @@ private:
 
     // No axis had a usable centroid extent or non-empty split.
     if (best.axis < 0 || best.bin < 0) {
-      return find_best_exact_split(primitives, start, end, parent_surface_area,
-                                   right_bounds);
+      const int axis = primitive_bounds.longest_axis();
+      return degenerate_split(primitives, start, end, axis,
+                              parent_surface_area);
+
+      // return find_best_exact_split(primitives, start, end,
+      // parent_surface_area);
     }
 
     // Partition at the chosen bin boundary; middle begins the right child.
@@ -358,56 +449,54 @@ private:
         .axis = best.axis,
         .position = position,
         .sah = best.sah,
-        .left_bounds = best.left_bounds,
-        .right_bounds = best.right_bounds,
+        .left_primitive_bounds = best.left_primitive_bounds,
+        .right_primitive_bounds = best.right_primitive_bounds,
+        .left_centroid_bounds = best.left_centroid_bounds,
+        .right_centroid_bounds = best.right_centroid_bounds,
     };
   }
 
   void build_range(std::vector<BuildPrimitive> &primitives, size_t start,
-                   size_t end, const BoundingBox<T> &bounds,
-                   std::vector<BoundingBox<T>> &right_bounds) {
+                   size_t end, const BoundingBox<T> &primitive_bounds,
+                   const BoundingBox<T> &centroid_bounds) {
+
     assert(start < end);
     assert(end <= primitives.size());
 
     const size_t primitive_count = end - start;
 
     if (primitive_count <= 2) {
-      emit_leaf(primitives, start, end, bounds);
+      emit_leaf(primitives, start, end, primitive_bounds);
       return;
     }
 
-    const T parent_surface_area = bounds.surface_area();
-
-    assert(std::isfinite(parent_surface_area));
-    assert(parent_surface_area > T{0});
-
     const SplitCandidate split = find_best_split(
-        primitives, start, end, parent_surface_area, right_bounds);
+        primitives, start, end, primitive_bounds, centroid_bounds);
 
     const T leaf_cost = T(primitive_count) * intersection_cost;
     const T split_cost = traversal_cost + intersection_cost * split.sah;
 
     if (leaf_cost <= split_cost) {
-      emit_leaf(primitives, start, end, bounds);
+      emit_leaf(primitives, start, end, primitive_bounds);
       return;
     }
 
     const size_t node_index = nodes.size();
 
     nodes.push_back(BVHNode<T>{
-        bounds,
+        primitive_bounds,
         0,
         0,
         static_cast<std::uint8_t>(split.axis),
     });
 
-    build_range(primitives, start, split.position, split.left_bounds,
-                right_bounds);
+    build_range(primitives, start, split.position, split.left_primitive_bounds,
+                split.left_centroid_bounds);
 
     const size_t right_child = nodes.size();
 
-    build_range(primitives, split.position, end, split.right_bounds,
-                right_bounds);
+    build_range(primitives, split.position, end, split.right_primitive_bounds,
+                split.right_centroid_bounds);
 
     nodes[node_index].offset = right_child;
   }
@@ -420,16 +509,13 @@ public:
     assert(!triangles.empty());
     assert(triangles.size() < std::numeric_limits<std::uint32_t>::max());
 
-    auto primitives = make_build_primitives(positions, triangles);
+    auto data = make_build_primitives(positions, triangles);
 
     indexes.reserve(triangles.size());
     nodes.reserve(2 * triangles.size() - 1);
 
-    const BoundingBox<T> root_bounds =
-        range_bounds(primitives, 0, primitives.size());
-    std::vector<BoundingBox<T>> right_bounds(primitives.size());
-
-    build_range(primitives, 0, primitives.size(), root_bounds, right_bounds);
+    build_range(data.primitives, 0, data.primitives.size(),
+                data.primitive_bounds, data.centroid_bounds);
   }
 
   [[nodiscard]] constexpr BoundingBox<T> bounding_box() const {

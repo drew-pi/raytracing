@@ -413,6 +413,8 @@ def main(argv=None):
             str(ROOT / "construction_analysis.py"),
             "--output-dir",
             str(results / "construction"),
+            "--name",
+            args.name,
             "--runs",
             str(args.construction_runs),
             "--sizes",
