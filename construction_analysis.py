@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import math
+import re
 import statistics
 import subprocess
 import sys
@@ -374,8 +375,11 @@ def main(argv=None):
     parser.add_argument(
         "--output-dir",
         type=Path,
-        required=True,
-        help="new directory for analysis output",
+        help="new directory for analysis output (default: benchmark-results/construction-[name-]<timestamp>)",
+    )
+    parser.add_argument(
+        "--name",
+        help="optional label used in the default output directory name",
     )
     parser.add_argument(
         "--runs", type=int, default=3, help="build repetitions per case (default: 3)"
@@ -389,8 +393,24 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if not 1 <= args.runs <= 2_147_483_647:
         parser.error("--runs must be between 1 and 2147483647")
+    if args.name is not None and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._-]*", args.name
+    ):
+        parser.error(
+            "--name must start with a letter or digit and contain only "
+            "letters, digits, '.', '_' or '-'"
+        )
 
-    output = args.output_dir.expanduser().resolve()
+    if args.output_dir is None:
+        suffix = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S.%fZ")
+        directory_name = (
+            f"construction-{args.name}-{suffix}"
+            if args.name
+            else f"construction-{suffix}"
+        )
+        output = ROOT / "benchmark-results" / directory_name
+    else:
+        output = args.output_dir.expanduser().resolve()
     output.mkdir(parents=True)
     log_path = output / "construction.log"
     started = timestamp()
@@ -445,6 +465,7 @@ def main(argv=None):
         (output / "summary.txt").write_text(summary, encoding="utf-8")
         metadata = {
             "suite": executable_metadata["suite"],
+            "name": args.name,
             "started_at": started,
             "finished_at": timestamp(),
             "runs": args.runs,
