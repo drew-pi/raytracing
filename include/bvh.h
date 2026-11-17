@@ -45,6 +45,8 @@ private:
   static constexpr T intersection_cost = T{0.5};
   static constexpr T traversal_cost = T{1};
 
+  static constexpr size_t minimum_leaf_size = 3;
+
   struct BuildPrimitive {
     BoundingBox<T> box;
     point3<T> centroid;
@@ -229,18 +231,21 @@ private:
   make_binning_data(const std::vector<BuildPrimitive> &primitives, size_t start,
                     size_t end, const BoundingBox<T> &centroid_bounds) {
 
-    std::array<std::array<Bin, bin_count>, 3> bins{};
+    BinningData data;
 
-    std::array<T, 3> minimums;
-    std::array<T, 3> maximums;
-    std::array<T, 3> bin_scales{};
+    // std::array<std::array<Bin, bin_count>, 3> bins{};
+
+    // std::array<T, 3> minimums;
+    // std::array<T, 3> maximums;
+    // std::array<T, 3> bin_scales{};
 
     for (int axis = 0; axis < 3; ++axis) {
-      minimums[axis] = centroid_bounds.minimum(axis);
-      maximums[axis] = centroid_bounds.maximum(axis);
+      data.minimums[axis] = centroid_bounds.minimum(axis);
+      data.maximums[axis] = centroid_bounds.maximum(axis);
 
-      if (maximums[axis] > minimums[axis]) {
-        bin_scales[axis] = T(bin_count) / (maximums[axis] - minimums[axis]);
+      if (data.maximums[axis] > data.minimums[axis]) {
+        data.scales[axis] =
+            T(bin_count) / (data.maximums[axis] - data.minimums[axis]);
       }
     }
 
@@ -248,11 +253,11 @@ private:
       const BuildPrimitive &primitive = primitives[i];
 
       for (int axis = 0; axis < 3; ++axis) {
-        if (maximums[axis] == minimums[axis])
+        if (data.maximums[axis] == data.minimums[axis])
           continue;
 
-        Bin &bin = bins[axis][bin_index(primitive, minimums[axis],
-                                        bin_scales[axis], axis)];
+        Bin &bin = data.bins[axis][bin_index(primitive, data.minimums[axis],
+                                             data.scales[axis], axis)];
 
         ++bin.count;
         bin.primitive_bounds =
@@ -260,12 +265,7 @@ private:
       }
     }
 
-    return BinningData{
-        .bins = std::move(bins),
-        .minimums = minimums,
-        .maximums = maximums,
-        .scales = bin_scales,
-    };
+    return data;
   }
 
   [[nodiscard]] static auto centroid_comparator(int axis) {
@@ -364,7 +364,7 @@ private:
 
     const size_t primitive_count = end - start;
 
-    if (primitive_count <= 2) {
+    if (primitive_count <= minimum_leaf_size) {
       emit_leaf(primitives, start, end, primitive_bounds);
       return;
     }
@@ -380,12 +380,14 @@ private:
       return;
     }
 
+    const T split_coordinate =
+        split.minimum + T(split.bin + 1) / split.bin_scale;
+
     // Partition only when SAH chooses to split.
     const auto middle = std::partition(
         primitives.begin() + start, primitives.begin() + end,
         [&](const BuildPrimitive &primitive) {
-          return bin_index(primitive, split.minimum, split.bin_scale,
-                           split.axis) <= split.bin;
+          return primitive.centroid[split.axis] < split_coordinate;
         });
 
     const size_t position = static_cast<size_t>(middle - primitives.begin());
@@ -435,7 +437,7 @@ public:
     auto data = make_build_primitives(positions, triangles);
 
     indexes.reserve(triangles.size());
-    nodes.reserve(2 * triangles.size() - 1);
+    nodes.reserve(triangles.size());
 
     build_range(data.primitives, 0, data.primitives.size(),
                 data.primitive_bounds, data.centroid_bounds);
