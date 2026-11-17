@@ -67,11 +67,24 @@ private:
 
   static constexpr int bin_count = 16;
 
+  struct Bin {
+    BoundingBox<T> primitive_bounds = BoundingBox<T>::empty();
+    std::uint32_t count = 0;
+  };
+
+  struct BinningData {
+    std::array<std::array<Bin, bin_count>, 3> bins{};
+    std::array<T, 3> minimums{};
+    std::array<T, 3> maximums{};
+    std::array<T, 3> scales{};
+  };
+
   struct BinnedSplitCandidate {
     int axis = -1;
     int bin = -1;
     T minimum = T{0};
     T maximum = T{0};
+    T bin_scale = T{0};
     T sah = std::numeric_limits<T>::infinity();
 
     BoundingBox<T> left_primitive_bounds = BoundingBox<T>::empty();
@@ -138,52 +151,33 @@ private:
   }
 
   [[nodiscard]] static int bin_index(const BuildPrimitive &primitive, T minimum,
-                                     T maximum, int axis) {
-    assert(maximum > minimum);
-    assert(axis >= 0 && axis < 3);
-    assert(bin_count > 0);
+                                     T bin_scale, int axis) {
+    const int index =
+        static_cast<int>((primitive.centroid[axis] - minimum) * bin_scale);
 
-    const T normalized =
-        (primitive.centroid[axis] - minimum) / (maximum - minimum);
-
-    return std::clamp(static_cast<int>(normalized * T(bin_count)), 0,
-                      bin_count - 1);
+    return std::clamp(index, 0, bin_count - 1);
   }
 
   [[nodiscard]] static BinnedSplitCandidate
-  evaluate_binned_splits(const std::vector<BuildPrimitive> &primitives,
-                         size_t start, size_t end, int axis,
-                         T parent_surface_area, T minimum, T maximum) {
-    struct Bin {
-      BoundingBox<T> primitive_bounds = BoundingBox<T>::empty();
-      std::uint32_t count = 0;
-    };
+  evaluate_binned_splits(const std::array<Bin, bin_count> &bins, int axis,
+                         T parent_surface_area, T minimum, T maximum,
+                         T bin_scale) {
 
-    assert(start < end);
-    assert(end <= primitives.size());
     assert(axis >= 0 && axis < 3);
     assert(parent_surface_area > T{0});
+
+    const T inverse_parent_area = T{1} / parent_surface_area;
 
     BinnedSplitCandidate best{
         .axis = axis,
         .minimum = minimum,
         .maximum = maximum,
+        .bin_scale = bin_scale,
     };
 
     // This axis cannot separate the primitives.
     if (minimum == maximum)
       return best;
-
-    std::array<Bin, bin_count> bins{};
-
-    for (size_t i = start; i < end; ++i) {
-      const BuildPrimitive &primitive = primitives[i];
-      Bin &bin = bins[bin_index(primitive, minimum, maximum, axis)];
-
-      ++bin.count;
-      bin.primitive_bounds =
-          BoundingBox<T>(primitive.box, bin.primitive_bounds);
-    }
 
     // suffix sweep (suffix[i] includes all i, i+1, ..., bin_count-1)
     std::array<BoundingBox<T>, bin_count> suffix_primitive_bounds;
@@ -215,11 +209,9 @@ private:
         continue;
 
       const T sah =
-          (left_primitive_bounds.surface_area() / parent_surface_area) *
-              T(left_count) +
-          (suffix_primitive_bounds[i + 1].surface_area() /
-           parent_surface_area) *
-              T(right_count);
+          (left_primitive_bounds.surface_area() * T(left_count) +
+           suffix_primitive_bounds[i + 1].surface_area() * T(right_count)) *
+          inverse_parent_area;
 
       if (sah < best.sah) {
         best.bin = i;
@@ -231,6 +223,49 @@ private:
     }
 
     return best;
+  }
+
+  [[nodiscard]] static BinningData
+  make_binning_data(const std::vector<BuildPrimitive> &primitives, size_t start,
+                    size_t end, const BoundingBox<T> &centroid_bounds) {
+
+    std::array<std::array<Bin, bin_count>, 3> bins{};
+
+    std::array<T, 3> minimums;
+    std::array<T, 3> maximums;
+    std::array<T, 3> bin_scales{};
+
+    for (int axis = 0; axis < 3; ++axis) {
+      minimums[axis] = centroid_bounds.minimum(axis);
+      maximums[axis] = centroid_bounds.maximum(axis);
+
+      if (maximums[axis] > minimums[axis]) {
+        bin_scales[axis] = T(bin_count) / (maximums[axis] - minimums[axis]);
+      }
+    }
+
+    for (size_t i = start; i < end; ++i) {
+      const BuildPrimitive &primitive = primitives[i];
+
+      for (int axis = 0; axis < 3; ++axis) {
+        if (maximums[axis] == minimums[axis])
+          continue;
+
+        Bin &bin = bins[axis][bin_index(primitive, minimums[axis],
+                                        bin_scales[axis], axis)];
+
+        ++bin.count;
+        bin.primitive_bounds =
+            BoundingBox<T>(bin.primitive_bounds, primitive.box);
+      }
+    }
+
+    return BinningData{
+        .bins = std::move(bins),
+        .minimums = minimums,
+        .maximums = maximums,
+        .scales = bin_scales,
+    };
   }
 
   [[nodiscard]] static auto centroid_comparator(int axis) {
@@ -291,23 +326,19 @@ private:
                   size_t end, const BoundingBox<T> &primitive_bounds,
                   const BoundingBox<T> &centroid_bounds) {
 
-    BinnedSplitCandidate best;
+    const BinningData data =
+        make_binning_data(primitives, start, end, centroid_bounds);
 
     const T parent_surface_area = primitive_bounds.surface_area();
-
-    assert(std::isfinite(parent_surface_area));
-    assert(parent_surface_area > T{0});
+    BinnedSplitCandidate best;
 
     for (int axis = 0; axis < 3; ++axis) {
-      T minimum = centroid_bounds.minimum(axis);
-      T maximum = centroid_bounds.maximum(axis);
-
-      if (minimum == maximum) {
+      if (data.minimums[axis] == data.maximums[axis])
         continue;
-      }
 
-      const BinnedSplitCandidate candidate = evaluate_binned_splits(
-          primitives, start, end, axis, parent_surface_area, minimum, maximum);
+      const auto candidate = evaluate_binned_splits(
+          data.bins[axis], axis, parent_surface_area, data.minimums[axis],
+          data.maximums[axis], data.scales[axis]);
 
       if (candidate.sah < best.sah)
         best = candidate;
@@ -319,9 +350,6 @@ private:
       // const int axis = primitive_bounds.longest_axis();
       // return degenerate_split(primitives, start, end, axis,
       //                         parent_surface_area);
-
-      // return find_best_exact_split(primitives, start, end,
-      // parent_surface_area);
     }
 
     return best;
@@ -356,7 +384,7 @@ private:
     const auto middle = std::partition(
         primitives.begin() + start, primitives.begin() + end,
         [&](const BuildPrimitive &primitive) {
-          return bin_index(primitive, split.minimum, split.maximum,
+          return bin_index(primitive, split.minimum, split.bin_scale,
                            split.axis) <= split.bin;
         });
 
