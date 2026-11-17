@@ -104,8 +104,10 @@ private:
           primitive_id,
       });
 
-      primitive_bounds.expand(primitives.back().box);
-      centroid_bounds.expand(primitives.back().centroid);
+      primitive_bounds =
+          BoundingBox<T>(primitives.back().box, primitive_bounds);
+      centroid_bounds =
+          BoundingBox<T>(primitives.back().centroid, centroid_bounds);
     }
 
     return BuildData{
@@ -179,7 +181,8 @@ private:
       Bin &bin = bins[bin_index(primitive, minimum, maximum, axis)];
 
       ++bin.count;
-      bin.primitive_bounds.expand(primitive.box);
+      bin.primitive_bounds =
+          BoundingBox<T>(primitive.box, bin.primitive_bounds);
     }
 
     // suffix sweep (suffix[i] includes all i, i+1, ..., bin_count-1)
@@ -191,8 +194,8 @@ private:
     suffix_counts[bin_count - 1] = bins[bin_count - 1].count;
 
     for (int i = bin_count - 2; i >= 0; --i) {
-      suffix_primitive_bounds[i] = suffix_primitive_bounds[i + 1];
-      suffix_primitive_bounds[i].expand(bins[i].primitive_bounds);
+      suffix_primitive_bounds[i] =
+          BoundingBox(suffix_primitive_bounds[i + 1], bins[i].primitive_bounds);
 
       suffix_counts[i] = bins[i].count + suffix_counts[i + 1];
     }
@@ -202,7 +205,8 @@ private:
     std::uint32_t left_count = 0;
 
     for (int i = 0; i < bin_count - 1; ++i) {
-      left_primitive_bounds.expand(bins[i].primitive_bounds);
+      left_primitive_bounds =
+          BoundingBox<T>(left_primitive_bounds, bins[i].primitive_bounds);
       left_count += bins[i].count;
 
       const std::uint32_t right_count = suffix_counts[i + 1];
@@ -258,11 +262,13 @@ private:
     BoundingBox<T> right_primitive_bounds = BoundingBox<T>::empty();
 
     for (size_t i = start; i < middle; ++i) {
-      left_primitive_bounds.expand(primitives[i].box);
+      left_primitive_bounds =
+          BoundingBox<T>(primitives[i].box, left_primitive_bounds);
     }
 
     for (size_t i = middle; i < end; ++i) {
-      right_primitive_bounds.expand(primitives[i].box);
+      right_primitive_bounds =
+          BoundingBox<T>(primitives[i].box, right_primitive_bounds);
     }
 
     const T sah =
@@ -372,10 +378,12 @@ private:
     BoundingBox<T> right_centroid_bounds = BoundingBox<T>::empty();
 
     for (size_t i = start; i < position; ++i)
-      left_centroid_bounds.expand(primitives[i].centroid);
+      left_centroid_bounds =
+          BoundingBox<T>(left_centroid_bounds, primitives[i].centroid);
 
     for (size_t i = position; i < end; ++i)
-      right_centroid_bounds.expand(primitives[i].centroid);
+      right_centroid_bounds =
+          BoundingBox<T>(primitives[i].centroid, right_centroid_bounds);
 
     build_range(primitives, start, position, split.left_primitive_bounds,
                 left_centroid_bounds);

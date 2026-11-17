@@ -59,27 +59,15 @@ public:
     z = Interval(box1.z_axis(), box2.z_axis());
   }
 
-  constexpr void expand(const point3<T> &point) noexcept {
-    x.minimum = std::min(x.minimum, point.x());
-    x.maximum = std::max(x.maximum, point.x());
+  constexpr BoundingBox(const BoundingBox<T> &box,
+                        const point3<T> &point) noexcept
+      : x(std::min(box.x.min(), point.x()), std::max(box.x.max(), point.x())),
+        y(std::min(box.y.min(), point.y()), std::max(box.y.max(), point.y())),
+        z(std::min(box.z.min(), point.z()), std::max(box.z.max(), point.z())) {}
 
-    y.minimum = std::min(y.minimum, point.y());
-    y.maximum = std::max(y.maximum, point.y());
-
-    z.minimum = std::min(z.minimum, point.z());
-    z.maximum = std::max(z.maximum, point.z());
-  }
-
-  constexpr void expand(const BoundingBox<T> &other) noexcept {
-    x.minimum = std::min(x.minimum, other.x.minimum);
-    x.maximum = std::max(x.maximum, other.x.maximum);
-
-    y.minimum = std::min(y.minimum, other.y.minimum);
-    y.maximum = std::max(y.maximum, other.y.maximum);
-
-    z.minimum = std::min(z.minimum, other.z.minimum);
-    z.maximum = std::max(z.maximum, other.z.maximum);
-  }
+  constexpr BoundingBox(const point3<T> &point,
+                        const BoundingBox<T> &box) noexcept
+      : BoundingBox(box, point) {}
 
   constexpr const Interval<T> &get_axis(int n) const noexcept {
     if (n == 1)
