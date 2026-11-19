@@ -344,15 +344,57 @@ private:
         best = candidate;
     }
 
-    // No axis had a usable centroid extent or non-empty split.
-    if (best.axis < 0 || best.bin < 0) {
-      return best;
-      // const int axis = primitive_bounds.longest_axis();
-      // return degenerate_split(primitives, start, end, axis,
-      //                         parent_surface_area);
+    return best;
+  }
+
+  [[nodiscard]] std::optional<SplitCandidate>
+  choose_and_apply_split(std::vector<BuildPrimitive> &primitives, size_t start,
+                         size_t end, const BoundingBox<T> &primitive_bounds,
+                         const BoundingBox<T> &centroid_bounds) {
+    const size_t primitive_count = end - start;
+    const T leaf_cost = T(primitive_count) * intersection_cost;
+
+    const BinnedSplitCandidate candidate = find_best_split(
+        primitives, start, end, primitive_bounds, centroid_bounds);
+
+    if (candidate.axis < 0 || candidate.bin < 0) {
+      const T parent_area = primitive_bounds.surface_area();
+      const int axis = primitive_bounds.longest_axis();
+
+      SplitCandidate split =
+          degenerate_split(primitives, start, end, axis, parent_area);
+
+      const T split_cost = traversal_cost + intersection_cost * split.sah;
+
+      if (leaf_cost <= split_cost)
+        return std::nullopt;
+
+      return split;
     }
 
-    return best;
+    const T split_cost = traversal_cost + intersection_cost * candidate.sah;
+
+    if (leaf_cost <= split_cost)
+      return std::nullopt;
+
+    const auto middle = std::partition(
+        primitives.begin() + start, primitives.begin() + end,
+        [&](const BuildPrimitive &primitive) {
+          return bin_index(primitive, candidate.minimum, candidate.bin_scale,
+                           candidate.axis) <= candidate.bin;
+        });
+
+    const size_t position = static_cast<size_t>(middle - primitives.begin());
+
+    assert(position > start && position < end);
+
+    return SplitCandidate{
+        .axis = candidate.axis,
+        .position = position,
+        .sah = candidate.sah,
+        .left_primitive_bounds = candidate.left_primitive_bounds,
+        .right_primitive_bounds = candidate.right_primitive_bounds,
+    };
   }
 
   void build_range(std::vector<BuildPrimitive> &primitives, size_t start,
@@ -369,31 +411,18 @@ private:
       return;
     }
 
-    const BinnedSplitCandidate split = find_best_split(
+    const auto split = choose_and_apply_split(
         primitives, start, end, primitive_bounds, centroid_bounds);
 
-    const T leaf_cost = T(primitive_count) * intersection_cost;
-    const T split_cost = traversal_cost + intersection_cost * split.sah;
-
-    if (leaf_cost <= split_cost) {
+    if (!split) {
       emit_leaf(primitives, start, end, primitive_bounds);
       return;
     }
 
-    const T split_coordinate =
-        split.minimum + T(split.bin + 1) / split.bin_scale;
-
-    // Partition only when SAH chooses to split.
-    const auto middle = std::partition(
-        primitives.begin() + start, primitives.begin() + end,
-        [&](const BuildPrimitive &primitive) {
-          return primitive.centroid[split.axis] < split_coordinate;
-        });
-
-    const size_t position = static_cast<size_t>(middle - primitives.begin());
+    const size_t position = split->position;
 
     assert(position > start && position < end);
-    assert(std::isfinite(split.sah));
+    assert(std::isfinite(split->sah));
 
     const size_t node_index = nodes.size();
 
@@ -401,7 +430,7 @@ private:
         primitive_bounds,
         0,
         0,
-        static_cast<std::uint8_t>(split.axis),
+        static_cast<std::uint8_t>(split->axis),
     });
 
     BoundingBox<T> left_centroid_bounds = BoundingBox<T>::empty();
@@ -415,12 +444,12 @@ private:
       right_centroid_bounds =
           BoundingBox<T>(primitives[i].centroid, right_centroid_bounds);
 
-    build_range(primitives, start, position, split.left_primitive_bounds,
+    build_range(primitives, start, position, split->left_primitive_bounds,
                 left_centroid_bounds);
 
     const size_t right_child = nodes.size();
 
-    build_range(primitives, position, end, split.right_primitive_bounds,
+    build_range(primitives, position, end, split->right_primitive_bounds,
                 right_centroid_bounds);
 
     nodes[node_index].offset = right_child;
