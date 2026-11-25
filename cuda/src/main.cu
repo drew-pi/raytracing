@@ -1,16 +1,18 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
-#include <cstdio>
+#include <cstddef>
 #include <cstdlib>
 #include <cuda_runtime.h>
+#include <iostream>
 #include <vector>
 
 #define CUDA_CHECK(call)                                                       \
   do {                                                                         \
-    const cudaError_t error = call;                                            \
+    const cudaError_t error = (call);                                          \
     if (error != cudaSuccess) {                                                \
-      std::fprintf(stderr, "CUDA error: %s\n", cudaGetErrorString(error));     \
+      std::cerr << "CUDA error: " << cudaGetErrorString(error) << " ("         \
+                << __FILE__ << ':' << __LINE__ << ")\n";                       \
       std::exit(EXIT_FAILURE);                                                 \
     }                                                                          \
   } while (false)
@@ -24,103 +26,77 @@ void cpu_add(std::size_t n, const float *x, float *y) {
 
 // Runs on the GPU.
 __global__ void gpu_add(std::size_t n, const float *x, float *y) {
-  const std::size_t start =
+  const std::size_t i =
       blockIdx.x * static_cast<std::size_t>(blockDim.x) + threadIdx.x;
 
-  const std::size_t stride = static_cast<std::size_t>(blockDim.x) * gridDim.x;
-
-  for (std::size_t i = start; i < n; i += stride) {
+  if (i < n) {
     y[i] += x[i];
   }
 }
 
 int main() {
   constexpr std::size_t N = 1 << 30;
+  const std::size_t bytes = N * sizeof(float);
 
-  std::vector<float> x(N);
-  std::vector<float> initial_y(N);
+  float *x = nullptr;
+  float *gpu_y = nullptr;
+
+  // Allocate memory accessible from the CPU and GPU.
+  CUDA_CHECK(cudaMallocManaged(&x, bytes));
+  CUDA_CHECK(cudaMallocManaged(&gpu_y, bytes));
+
   std::vector<float> cpu_y(N);
-  std::vector<float> gpu_y(N);
 
+  // Initialize data on the CPU.
   for (std::size_t i = 0; i < N; ++i) {
     x[i] = static_cast<float>(i % 1000) / 1000.0f;
-    initial_y[i] = static_cast<float>(i % 500) / 500.0f;
+
+    const float initial_y = static_cast<float>(i % 500) / 500.0f;
+
+    cpu_y[i] = initial_y;
+    gpu_y[i] = initial_y;
   }
 
-  // Initialize CUDA before timing.
-  CUDA_CHECK(cudaFree(nullptr));
-
-  // CPU benchmark.
-  cpu_y = initial_y;
-
+  // Run and time the CPU implementation.
   const auto cpu_start = std::chrono::steady_clock::now();
-  cpu_add(N, x.data(), cpu_y.data());
+
+  cpu_add(N, x, cpu_y.data());
+
   const auto cpu_stop = std::chrono::steady_clock::now();
 
   const double cpu_ms =
       std::chrono::duration<double, std::milli>(cpu_stop - cpu_start).count();
 
-  // Allocate GPU memory.
-  float *device_x = nullptr;
-  float *device_y = nullptr;
-
-  CUDA_CHECK(cudaMalloc(&device_x, N * sizeof(float)));
-  CUDA_CHECK(cudaMalloc(&device_y, N * sizeof(float)));
-
-  CUDA_CHECK(cudaMemcpy(device_x, x.data(), N * sizeof(float),
-                        cudaMemcpyHostToDevice));
-
-  CUDA_CHECK(cudaMemcpy(device_y, initial_y.data(), N * sizeof(float),
-                        cudaMemcpyHostToDevice));
-
+  // Launch the GPU implementation.
   constexpr int threads = 256;
-  const int blocks =
-      std::min<int>(static_cast<int>((N + threads - 1) / threads), 4096);
+  const int blocks = static_cast<int>((N + threads - 1) / threads);
 
-  // GPU kernel-only benchmark.
-  cudaEvent_t gpu_start;
-  cudaEvent_t gpu_stop;
+  CUDA_CHECK(cudaMemPrefetchAsync(x, bytes, 0, 0));
+  CUDA_CHECK(cudaMemPrefetchAsync(gpu_y, bytes, 0, 0));
 
-  CUDA_CHECK(cudaEventCreate(&gpu_start));
-  CUDA_CHECK(cudaEventCreate(&gpu_stop));
+  gpu_add<<<blocks, threads>>>(N, x, gpu_y);
 
-  CUDA_CHECK(cudaEventRecord(gpu_start));
+  CUDA_CHECK(cudaMemPrefetchAsync(gpu_y, bytes, cudaCpuDeviceId, 0));
 
-  gpu_add<<<blocks, threads>>>(N, device_x, device_y);
+  // Check launch and execution errors.
   CUDA_CHECK(cudaGetLastError());
+  CUDA_CHECK(cudaDeviceSynchronize());
 
-  CUDA_CHECK(cudaEventRecord(gpu_stop));
-  CUDA_CHECK(cudaEventSynchronize(gpu_stop));
-
-  float gpu_ms = 0.0f;
-  CUDA_CHECK(cudaEventElapsedTime(&gpu_ms, gpu_start, gpu_stop));
-
-  CUDA_CHECK(cudaMemcpy(gpu_y.data(), device_y, N * sizeof(float),
-                        cudaMemcpyDeviceToHost));
-
-  // Check correctness.
-  bool valid = true;
+  // Validate the result.
+  float max_error = 0.0f;
 
   for (std::size_t i = 0; i < N; ++i) {
-    const float expected = x[i] + initial_y[i];
+    const float difference = std::fabs(cpu_y[i] - gpu_y[i]);
 
-    if (std::abs(cpu_y[i] - expected) > 1e-6f ||
-        std::abs(gpu_y[i] - expected) > 1e-6f) {
-      valid = false;
-      break;
-    }
+    max_error = std::max(max_error, difference);
   }
 
-  std::printf("Elements:       %zu\n", N);
-  std::printf("CPU:     %.3f ms\n", cpu_ms);
-  std::printf("GPU kernel:     %.3f ms\n", gpu_ms);
-  std::printf("GPU speedup:    %.2fx\n", cpu_ms / gpu_ms);
-  std::printf("Results valid:  %s\n", valid ? "yes" : "no");
+  std::cout << "Elements:  " << N << '\n';
+  std::cout << "CPU time:  " << cpu_ms << " ms\n";
+  std::cout << "Max error: " << max_error << '\n';
 
-  CUDA_CHECK(cudaEventDestroy(gpu_start));
-  CUDA_CHECK(cudaEventDestroy(gpu_stop));
-  CUDA_CHECK(cudaFree(device_x));
-  CUDA_CHECK(cudaFree(device_y));
+  CUDA_CHECK(cudaFree(x));
+  CUDA_CHECK(cudaFree(gpu_y));
 
-  return valid ? EXIT_SUCCESS : EXIT_FAILURE;
+  return max_error <= 1e-6f ? EXIT_SUCCESS : EXIT_FAILURE;
 }

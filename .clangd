@@ -1,4 +1,27 @@
+If:
+    PathMatch: cuda/.*\.(cu|cuh)$
+CompileFlags:
+    CompilationDatabase: build/cuda
+    Compiler: clang++
+    Add:
+        - -xcuda
+        - --cuda-gpu-arch=sm_86
+        - -Wno-unknown-cuda-version
+    Remove:
+        - -Xfatbin*
+        - -gencode*
+        - --generate-code*
+        - -ccbin*
+        - --compiler-options*
+        - -Xcompiler*
+        - --expt-extended-lambda
+        - --expt-relaxed-constexpr
+        - --options-file*
+---
+If:
+    PathMatch: .*\.(cpp|h)$
 CompileFlags:
     CompilationDatabase: build/debug
     Compiler: g++
-    Add: [-std=c++20]
+    Add:
+        - -std=c++20
