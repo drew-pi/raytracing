@@ -18,22 +18,24 @@
 #include <mesh_generators/ply.h>
 #include <vec3.h>
 
+using BenchmarkScalar = float;
+
 // Pass this to render_multi_thread() or render_checksum(); thread count is a
 // render-call parameter, not a Camera or Scene setting.
 inline constexpr int benchmark_thread_count = 1;
-inline constexpr char benchmark_scene_id[] = "xyzrgb_dragon_glass_v1";
+inline constexpr char benchmark_scene_id[] = "xyzrgb_dragon_glass_f32_v1";
 inline constexpr char benchmark_scene_source[] = "src/scenes/benchmark_scene.h";
 
-[[nodiscard]] inline Camera<double> create_benchmark_camera() {
-  Camera<double> camera;
+[[nodiscard]] inline Camera<BenchmarkScalar> create_benchmark_camera() {
+  Camera<BenchmarkScalar> camera;
   camera.aspect_ratio = 4.0 / 3.0;
   camera.image_width = 1600;
   camera.samples_per_pixel = 200;
   camera.max_depth = 20;
   camera.vfov = 40;
-  camera.look_from = point3<double>(0.0, 4.0, 11.0);
-  camera.look_at = point3<double>(0.0, 1.5, 0.0);
-  camera.v_up = vec3<double>(0.0, 1.0, 0.0);
+  camera.look_from = point3<BenchmarkScalar>(0.0, 4.0, 11.0);
+  camera.look_at = point3<BenchmarkScalar>(0.0, 1.5, 0.0);
+  camera.v_up = vec3<BenchmarkScalar>(0.0, 1.0, 0.0);
   return camera;
 }
 
@@ -47,16 +49,18 @@ inline void write_benchmark_metadata(std::ostream &out) {
 
 // Independent snapshot of the real scene so future scene edits do not change
 // the benchmark workload. project_root is the directory containing assets/.
-[[nodiscard]] inline std::tuple<Camera<double>, std::vector<Mesh<double>>>
+[[nodiscard]] inline std::tuple<Camera<BenchmarkScalar>,
+                                std::vector<Mesh<BenchmarkScalar>>>
 create_benchmark_scene(const std::filesystem::path &project_root = ".") {
-  using Point = point3<double>;
-  using Colour = Color<double>;
+  using Point = point3<BenchmarkScalar>;
+  using Colour = Color<BenchmarkScalar>;
 
   // Imported meshes have private buffers and no transform API. Rebuild through
   // the public constructor after centering and applying a uniform positive
   // scale.
-  const auto place_mesh = [](Mesh<double> mesh, const Point &center,
-                             double longest_extent, bool stand_on_floor = false,
+  const auto place_mesh = [](Mesh<BenchmarkScalar> mesh, const Point &center,
+                             BenchmarkScalar longest_extent,
+                             bool stand_on_floor = false,
                              bool face_forward = false) {
     std::vector<Point> positions;
     positions.reserve(mesh.vertex_count());
@@ -82,7 +86,8 @@ create_benchmark_scene(const std::filesystem::path &project_root = ".") {
     }
 
     const auto extent = maximum - minimum;
-    const double source_extent = std::max({extent[0], extent[1], extent[2]});
+    const BenchmarkScalar source_extent =
+        std::max({extent[0], extent[1], extent[2]});
     if (!std::isfinite(source_extent) || source_extent <= 0.0) {
       throw std::runtime_error("Benchmark scene: mesh has invalid bounds");
     }
@@ -91,7 +96,7 @@ create_benchmark_scene(const std::filesystem::path &project_root = ".") {
     if (stand_on_floor) {
       source_center[1] = minimum[1];
     }
-    const double scale = longest_extent / source_extent;
+    const BenchmarkScalar scale = longest_extent / source_extent;
     for (auto &position : positions) {
       position = center + scale * (position - source_center);
     }
@@ -107,26 +112,26 @@ create_benchmark_scene(const std::filesystem::path &project_root = ".") {
     }
 
     // load_ply currently supplies no vertex normals, so retain flat shading.
-    return Mesh<double>{std::move(positions),
-                        {},
-                        std::move(triangles),
-                        std::move(mesh).move_material()};
+    return Mesh<BenchmarkScalar>{std::move(positions),
+                                 {},
+                                 std::move(triangles),
+                                 std::move(mesh).move_material()};
   };
 
-  std::vector<Mesh<double>> meshes;
+  std::vector<Mesh<BenchmarkScalar>> meshes;
   meshes.reserve(2);
 
-  meshes.push_back(
-      place_mesh(load_ply<double>(project_root / "assets/xyzrgb_dragon.ply",
-                                  std::make_unique<Lambertian<double>>(
-                                      Colour(0.24, 0.55, 0.38))),
-                 Point(0.0, 0.0, 0.0), 6.0, true, true));
+  meshes.push_back(place_mesh(
+      load_ply<BenchmarkScalar>(project_root / "assets/xyzrgb_dragon.ply",
+                                std::make_unique<Lambertian<BenchmarkScalar>>(
+                                    Colour(0.24, 0.55, 0.38))),
+      Point(0.0, 0.0, 0.0), 6.0, true, true));
 
   // A closed slab supplies both entry and exit boundaries for glass refraction.
   // Its upper face is y = 0, exactly where the dragon's lowest vertex rests.
-  meshes.push_back(make_aligned_box<double>(
+  meshes.push_back(make_aligned_box<BenchmarkScalar>(
       Point(-12.0, -0.25, -12.0), Point(12.0, 0.0, 12.0),
-      std::make_unique<Dielectric<double>>(1.5)));
+      std::make_unique<Dielectric<BenchmarkScalar>>(1.5)));
 
   auto camera = create_benchmark_camera();
 
