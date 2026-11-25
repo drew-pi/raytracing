@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
   auto [camera, meshes] = create_benchmark_scene();
   const auto t1 = Clock::now();
 
-  Scene<double> scene;
+  Scene<BenchmarkScalar> scene;
   scene.build(std::move(meshes));
   const auto t2 = Clock::now();
 

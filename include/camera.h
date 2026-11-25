@@ -341,7 +341,7 @@ private:
     }
 
     vec3<T> unit = unit_vector(r.direction());
-    auto a = 0.5 * (unit.y() + 1.0); // remaps [-1, 1] to [0,1]
-    return (1.0 - a) * Color(1.0, 1.0, 1.0) + a * Color(0.5, 0.7, 1.0);
+    T a = 0.5 * (unit.y() + 1.0); // remaps [-1, 1] to [0,1]
+    return (1.0 - a) * Color<T>(1.0, 1.0, 1.0) + a * Color<T>(0.5, 0.7, 1.0);
   }
 };

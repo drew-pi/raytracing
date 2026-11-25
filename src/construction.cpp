@@ -21,7 +21,7 @@
 namespace {
 
 struct Geometry {
-  std::vector<point3<double>> positions;
+  std::vector<point3<BenchmarkScalar>> positions;
   std::vector<SceneTriangle> triangles;
 };
 
@@ -81,8 +81,9 @@ struct Options {
   return options;
 }
 
-void append_triangle(Geometry &geometry, const point3<double> &a,
-                     const point3<double> &b, const point3<double> &c) {
+void append_triangle(Geometry &geometry, const point3<BenchmarkScalar> &a,
+                     const point3<BenchmarkScalar> &b,
+                     const point3<BenchmarkScalar> &c) {
   if (geometry.positions.size() >
       std::numeric_limits<std::uint32_t>::max() - std::size_t{3})
     throw std::length_error(
@@ -94,15 +95,15 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
   geometry.triangles.push_back({{first, first + 1, first + 2}, 0});
 }
 
-[[nodiscard]] point3<double> lattice_point(std::size_t index,
-                                           std::size_t count) {
+[[nodiscard]] point3<BenchmarkScalar> lattice_point(std::size_t index,
+                                                    std::size_t count) {
   const auto side = static_cast<std::size_t>(
-      std::ceil(std::cbrt(static_cast<double>(count))));
+      std::ceil(std::cbrt(static_cast<BenchmarkScalar>(count))));
   const std::size_t x = index % side;
   const std::size_t y = (index / side) % side;
   const std::size_t z = index / (side * side);
-  return {static_cast<double>(x), static_cast<double>(y),
-          static_cast<double>(z)};
+  return {static_cast<BenchmarkScalar>(x), static_cast<BenchmarkScalar>(y),
+          static_cast<BenchmarkScalar>(z)};
 }
 
 [[nodiscard]] Geometry make_uniform(std::size_t count) {
@@ -111,9 +112,9 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
   geometry.triangles.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
     const auto center = 2.0 * lattice_point(i, count);
-    append_triangle(geometry, center + vec3<double>(-0.35, -0.25, 0.0),
-                    center + vec3<double>(0.4, -0.2, 0.1),
-                    center + vec3<double>(0.0, 0.45, -0.1));
+    append_triangle(geometry, center + vec3<BenchmarkScalar>(-0.35, -0.25, 0.0),
+                    center + vec3<BenchmarkScalar>(0.4, -0.2, 0.1),
+                    center + vec3<BenchmarkScalar>(0.0, 0.45, -0.1));
   }
   return geometry;
 }
@@ -127,13 +128,13 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
     const std::size_t cluster = i % 8;
     const std::size_t local_index = i / std::size_t{8};
     const auto local = 0.12 * lattice_point(local_index, per_cluster);
-    const point3<double> origin((cluster & 1) ? 30.0 : -30.0,
-                                (cluster & 2) ? 30.0 : -30.0,
-                                (cluster & 4) ? 30.0 : -30.0);
+    const point3<BenchmarkScalar> origin((cluster & 1) ? 30.0 : -30.0,
+                                         (cluster & 2) ? 30.0 : -30.0,
+                                         (cluster & 4) ? 30.0 : -30.0);
     const auto center = origin + local;
-    append_triangle(geometry, center + vec3<double>(-0.04, -0.03, 0.0),
-                    center + vec3<double>(0.05, -0.02, 0.01),
-                    center + vec3<double>(0.0, 0.05, -0.01));
+    append_triangle(geometry, center + vec3<BenchmarkScalar>(-0.04, -0.03, 0.0),
+                    center + vec3<BenchmarkScalar>(0.05, -0.02, 0.01),
+                    center + vec3<BenchmarkScalar>(0.0, 0.05, -0.01));
   }
   return geometry;
 }
@@ -143,13 +144,13 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
   geometry.positions.reserve(count * 3);
   geometry.triangles.reserve(count);
   const auto side = static_cast<std::size_t>(
-      std::ceil(std::sqrt(static_cast<double>(count))));
+      std::ceil(std::sqrt(static_cast<BenchmarkScalar>(count))));
   for (std::size_t i = 0; i < count; ++i) {
     const std::size_t row = i / side;
-    const double x = static_cast<double>(i % side);
-    const double y = static_cast<double>(row);
-    append_triangle(geometry, {x, y, 0.0}, {x + 0.9, y, 0.0},
-                    {x, y + 0.9, 0.0});
+    const BenchmarkScalar x = static_cast<BenchmarkScalar>(i % side);
+    const BenchmarkScalar y = static_cast<BenchmarkScalar>(row);
+    append_triangle(geometry, {x, y, 0.0f}, {x + 0.9f, y, 0.0f},
+                    {x, y + 0.9f, 0.0f});
   }
   return geometry;
 }
@@ -159,11 +160,13 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
   geometry.positions.reserve(count * 3);
   geometry.triangles.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
-    const double radius = 1.0 + static_cast<double>(i % 31) / 31.0;
-    const double y = 0.5 + static_cast<double>(i % 17) / 34.0;
-    const double z = 0.25 + static_cast<double>(i % 13) / 52.0;
-    append_triangle(geometry, {radius, 0.0, 0.0}, {-0.5 * radius, y, z},
-                    {-0.5 * radius, -y, -z});
+    const BenchmarkScalar radius =
+        1.0 + static_cast<BenchmarkScalar>(i % 31) / 31.0;
+    const BenchmarkScalar y = 0.5 + static_cast<BenchmarkScalar>(i % 17) / 34.0;
+    const BenchmarkScalar z =
+        0.25 + static_cast<BenchmarkScalar>(i % 13) / 52.0;
+    append_triangle(geometry, {radius, 0.0f, 0.0f}, {-0.5f * radius, y, z},
+                    {-0.5f * radius, -y, -z});
   }
   return geometry;
 }
@@ -174,9 +177,9 @@ void append_triangle(Geometry &geometry, const point3<double> &a,
   geometry.triangles.reserve(count);
   for (std::size_t i = 0; i < count; ++i) {
     const auto center = 1.5 * lattice_point(i, count);
-    append_triangle(geometry, center + vec3<double>(-0.7, 0.0, 0.0),
-                    center + vec3<double>(0.7, 0.0, 0.0),
-                    center + vec3<double>(0.0, 1e-6, 1e-6));
+    append_triangle(geometry, center + vec3<BenchmarkScalar>(-0.7, 0.0, 0.0),
+                    center + vec3<BenchmarkScalar>(0.7, 0.0, 0.0),
+                    center + vec3<BenchmarkScalar>(0.0, 1e-6, 1e-6));
   }
   return geometry;
 }
@@ -205,16 +208,17 @@ void write_case(std::string_view scene, std::string_view category,
                 std::optional<std::size_t> requested, const Geometry &geometry,
                 int runs) {
   using Clock = std::chrono::steady_clock;
-  std::vector<double> times;
+  std::vector<BenchmarkScalar> times;
   times.reserve(static_cast<std::size_t>(runs));
-  diagnostic::BVHStatistics<double> expected;
+  diagnostic::BVHStatistics<BenchmarkScalar> expected;
 
   for (int run = 0; run < runs; ++run) {
     const auto begin = Clock::now();
-    BVH<double> bvh(geometry.positions, geometry.triangles);
+    BVH<BenchmarkScalar> bvh(geometry.positions, geometry.triangles);
     const auto end = Clock::now();
     times.push_back(
-        std::chrono::duration<double, std::milli>(end - begin).count());
+        std::chrono::duration<BenchmarkScalar, std::milli>(end - begin)
+            .count());
     const auto stats = diagnostic::bvh_statistics(bvh);
     if (run == 0) {
       expected = stats;

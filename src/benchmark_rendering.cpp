@@ -113,7 +113,7 @@ int main(int argc, char *argv[]) {
     const auto scene_begin = Clock::now();
     auto [camera, meshes] = create_benchmark_scene();
     const auto scene_end = Clock::now();
-    Scene<double> scene;
+    Scene<BenchmarkScalar> scene;
     scene.build(std::move(meshes));
     const auto build_end = Clock::now();
 

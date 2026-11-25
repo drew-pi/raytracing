@@ -30,7 +30,7 @@ int main(int argc, char *argv[]) {
           "Expected no arguments, --metadata, or --help");
 
     auto [camera, meshes] = create_benchmark_scene();
-    Scene<double> scene;
+    Scene<BenchmarkScalar> scene;
     scene.build(std::move(meshes));
     diagnostic::reset(camera.max_depth);
 
